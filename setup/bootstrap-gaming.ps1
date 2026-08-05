@@ -41,7 +41,12 @@ Repair-WinGetPackageManager cmdlet, else direct msixbundle download.
 param(
     [ValidateSet('recommended', 'all', 'minimal')] [string]$Preset,
     [ValidateSet('all', 'security')] [string]$UpdateScope,
-    [string]$ForUser
+    [string]$ForUser,
+    # Driven by setup-console.ps1, which already collected the answers:
+    [string[]]$Items,
+    [switch]$NonInteractive,
+    [ValidateSet('steam', 'playnite', 'hydra', 'all')] [string[]]$Launchers,
+    [ValidateSet('steam', 'playnite', 'hydra')] [string]$BootInto
 )
 $ErrorActionPreference = 'Stop'
 
@@ -132,11 +137,14 @@ $items = [ordered]@{
 $recommendedKeys = @($items.Keys | Where-Object { $items[$_].Recommended })
 
 $selected = $null
+if ($Items) { $selected = @($Items | Where-Object { $items.Contains($_) }) }
 switch ($Preset) {
     'all'         { $selected = @($items.Keys) }
     'minimal'     { $selected = @('runtimes', 'frontends', 'defender') }
     'recommended' { $selected = $recommendedKeys }
 }
+
+if (-not $selected -and $NonInteractive) { $selected = $recommendedKeys }
 
 if (-not $selected) {
     Write-Host "GPU(s) found: $gpus"
@@ -217,8 +225,13 @@ foreach ($key in $selected) {
 
         'frontends' {
             $splat = @{}
-            if ($Preset -eq 'all') { $splat['Install'] = 'all'; $splat['BootInto'] = 'steam' }
-            elseif ($Preset -eq 'minimal') { $splat['Install'] = 'steam'; $splat['BootInto'] = 'steam' }
+            if ($Launchers) { $splat['Install'] = $Launchers }
+            elseif ($Preset -eq 'all') { $splat['Install'] = 'all' }
+            elseif ($Preset -eq 'minimal') { $splat['Install'] = 'steam' }
+            if ($BootInto) { $splat['BootInto'] = $BootInto }
+            elseif ($Preset) { $splat['BootInto'] = 'steam' }
+            # during provisioning the console account may have no profile yet
+            if ($NonInteractive) { $splat['Machine'] = $true }
             if ($ForUser) { $splat['ForUser'] = $ForUser }
             & (Join-Path $PSScriptRoot 'install-frontend.ps1') @splat
         }
@@ -257,7 +270,7 @@ foreach ($key in $selected) {
         'updates' {
             $scope = $UpdateScope
             if (-not $scope) {
-                if ($Preset) {
+                if ($Preset -or $NonInteractive) {
                     $scope = 'all'
                 } else {
                     Write-Host ''

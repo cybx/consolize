@@ -15,6 +15,10 @@ $ErrorActionPreference = 'Continue'
 $here = $PSScriptRoot
 $marker = Join-Path $env:LOCALAPPDATA 'Consolize\first-logon-done'
 
+# What the SYSTEM finish task waits for: this account is ready to become a
+# console. setup-console.ps1 grants this account write access to that folder.
+$readyMarker = Join-Path $env:ProgramData 'Consolize\account-ready'
+
 if (Test-Path $marker) { return }
 
 Write-Host ''
@@ -102,12 +106,31 @@ if (-not $steam) {
     }
 }
 
-New-Item -ItemType Directory -Force -Path (Split-Path $marker) | Out-Null
-Set-Content $marker (Get-Date).ToString('s') -Encoding UTF8
-
-Write-Host ''
-Write-Host 'This account is ready.' -ForegroundColor Green
-Write-Host 'Phase 3: log back into the admin account and run'
-Write-Host '  .\setup-console.ps1 -EnableShell'
-Write-Host ''
-Read-Host 'Press Enter to close'
+$steamReady = $steam -and (Test-SteamLogin $steam)
+if ($steamReady) {
+    # only mark this done when it actually finished: otherwise the task should
+    # run again at the next logon instead of silently skipping itself
+    New-Item -ItemType Directory -Force -Path (Split-Path $marker) | Out-Null
+    Set-Content $marker (Get-Date).ToString('s') -Encoding UTF8
+    try {
+        Set-Content $readyMarker (Get-Date).ToString('s') -Encoding UTF8
+        Write-Host ''
+        Write-Host 'This account is ready.' -ForegroundColor Green
+        Write-Host 'The machine takes it from here: it checks everything, replaces the shell'
+        Write-Host 'and reboots into console mode in a moment. Nothing else for you to do.'
+        Write-Host ''
+        Write-Host 'Closing in 20 seconds...'
+        Start-Sleep -Seconds 20
+    } catch {
+        Write-Warning "Could not signal readiness ($($_.Exception.Message))."
+        Write-Warning 'On the admin account run: .\setup-console.ps1 -Finish'
+        Read-Host 'Press Enter to close'
+    }
+} else {
+    Write-Host ''
+    Write-Warning 'Steam is not signed in on this account, so the shell will NOT be replaced.'
+    Write-Warning 'That is deliberate: booting into a login window a controller cannot fill'
+    Write-Warning 'in would strand you. Sign in to Steam with "Remember me", then run:'
+    Write-Host "    $($MyInvocation.MyCommand.Path)"
+    Read-Host 'Press Enter to close'
+}

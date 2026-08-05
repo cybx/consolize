@@ -49,21 +49,29 @@ No need to open PowerShell as administrator: it asks for elevation itself and
 continues in the elevated window. It installs `consolize.exe` plus every setup
 script and then runs the whole provisioning, asking before each part.
 
+You answer a short interview once. Everything after that is automatic, including
+the reboot and the account switch it needs.
+
 ### Two accounts, and why
 
 The account Windows was installed with keeps the normal desktop and stays your
 way back in. A second account (`gamer` by default) is the only one whose shell
 gets replaced.
 
-Setup runs in three phases, because Steam keeps its login per Windows user, so
-an administrator cannot sign in on the console account's behalf:
+The setup drives itself across that boundary, which it has to cross because
+Windows keeps the Steam login per user and no administrator can sign in on
+another account's behalf:
 
-1. **As admin:** apps, runtimes, quiet layer, power, startup, performance,
-   autologon, and a one-shot task for the console account.
-2. **As the console account:** log in once. A window opens by itself, applies
-   the per-user settings and Steam so you can sign in with "Remember me".
-3. **As admin again:** `.\setup-console.ps1 -EnableShell`, which preflights and
-   only then replaces the shell.
+1. Everything machine-wide runs from your answers, then the machine reboots.
+2. It logs into the console account by itself and a window finishes that
+   account: per-user settings, then Steam, waiting for you to sign in with
+   "Remember me" ticked. That is the one screen that needs you.
+3. A SYSTEM task notices the account is ready, preflights, replaces the shell
+   and reboots into console mode.
+
+If the Steam sign-in never happens, step 3 refuses to replace the shell and says
+why: booting into a login window a controller cannot fill in would strand you.
+Cancel a setup in progress with `.\setup-console.ps1 -Abort`.
 
 Everything below is the manual/from-source path; each script also works alone.
 
