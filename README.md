@@ -37,6 +37,17 @@ No `Winlogon\Shell` registry rewrite, no scheduled task launching a VBS that lau
 | F0 | Provisioning: gaming bootstrap (GPU driver, runtimes, updates) + `autounattend.xml` | **bootstrap in `setup/`**, autounattend pending |
 | F5 | Remote maintenance (OpenSSH, second admin account, clean uninstall) | planned |
 
+## Install
+
+From an **administrator** PowerShell on the machine that will become the console:
+
+```powershell
+irm https://raw.githubusercontent.com/cybx/consolize/main/get.ps1 | iex
+```
+
+That installs `consolize.exe` and every setup script, then offers to run the
+provisioning menu. Everything below is the manual/from-source path.
+
 ## Quick start (bench testing, no shell replacement)
 
 You can try the session manager inside a normal desktop session first:
