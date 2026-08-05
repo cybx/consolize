@@ -26,7 +26,10 @@ param(
     [switch]$Unattended,
     [switch]$Finish,
     [switch]$Abort,
-    [string]$UserName
+    [string]$UserName,
+    # NetFx3 pulls ~250 MB from Windows Update and can take 15 minutes; handy
+    # when resuming a run that already spent that time, or on a slow link.
+    [switch]$SkipNetFx3
 )
 $ErrorActionPreference = 'Stop'
 
@@ -315,6 +318,7 @@ if ($a.Torrent) { $selection += 'torrent' }
 
 & (Join-Path $here 'bootstrap-gaming.ps1') `
     -NonInteractive `
+    -SkipNetFx3:$SkipNetFx3 `
     -Items $selection `
     -UpdateScope $(if ($a.Updates -eq 'security') { 'security' } else { 'all' }) `
     -Launchers $a.Launchers `

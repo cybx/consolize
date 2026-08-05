@@ -46,7 +46,10 @@ param(
     [string[]]$Items,
     [switch]$NonInteractive,
     [ValidateSet('steam', 'playnite', 'hydra', 'all')] [string[]]$Launchers,
-    [ValidateSet('steam', 'playnite', 'hydra')] [string]$BootInto
+    [ValidateSet('steam', 'playnite', 'hydra')] [string]$BootInto,
+    # NetFx3 pulls ~250 MB from Windows Update and only matters to older
+    # launchers, so it is the one runtime worth being able to leave out.
+    [switch]$SkipNetFx3
 )
 $ErrorActionPreference = 'Stop'
 
@@ -211,12 +214,24 @@ foreach ($key in $selected) {
 
             Write-Host '>> .NET Framework 3.5 (old launchers and tools)...' -ForegroundColor Cyan
             $netfx = Get-WindowsOptionalFeature -Online -FeatureName NetFx3 -ErrorAction SilentlyContinue
-            if ($netfx -and $netfx.State -ne 'Enabled') {
+            if ($SkipNetFx3) {
+                Write-Host '   skipped (-SkipNetFx3).'
+            } elseif ($netfx -and $netfx.State -ne 'Enabled') {
+                # Roughly 250 MB straight from Windows Update, and it prints
+                # nothing while it works. Say so, rather than looking hung.
+                Write-Host '   this one downloads ~250 MB from Windows Update and prints nothing'
+                Write-Host '   while it works: 5 to 15 minutes is normal, longer on a VM.'
+                Write-Host '   Watch it from another window with:'
+                Write-Host '     Get-Content C:\Windows\Logs\DISM\dism.log -Tail 5 -Wait' -ForegroundColor DarkGray
+                Write-Host '   (skip it next time with: .\bootstrap-gaming.ps1 -SkipNetFx3)' -ForegroundColor DarkGray
+                $started = Get-Date
                 try {
                     Enable-WindowsOptionalFeature -Online -FeatureName NetFx3 -All -NoRestart -ErrorAction Stop | Out-Null
-                    Write-Host '   enabled.'
+                    Write-Host "   enabled in $([int]((Get-Date) - $started).TotalMinutes) min."
                 } catch {
-                    Write-Warning "   could not enable NetFx3 ($($_.Exception.Message)). It downloads from Windows Update; check the connection."
+                    Write-Warning "   could not enable NetFx3 ($($_.Exception.Message))."
+                    Write-Warning '   Not fatal: it only matters for older launchers. Retry later with'
+                    Write-Warning '   Enable-WindowsOptionalFeature -Online -FeatureName NetFx3 -All'
                 }
             } else {
                 Write-Host '   already enabled.'
