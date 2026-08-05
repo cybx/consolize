@@ -433,6 +433,94 @@ internal static class Program
         thread.Start();
     }
 
+    // ----- tray icon: the way back from desktop mode ------------------------
+    // Desktop mode is a dead end without it: the frontend is gone from the
+    // screen and there is nothing obvious to click to get the console back.
+
+    private static Thread? _trayThread;
+    private static NotifyIcon? _trayIcon;
+    private static Control? _trayHost;
+
+    private static void ShowTray()
+    {
+        if (_trayThread is { IsAlive: true }) return;
+
+        _trayThread = new Thread(() =>
+        {
+            try
+            {
+                _trayHost = new Control();
+                _trayHost.CreateControl();
+
+                var menu = new ContextMenuStrip();
+                menu.Items.Add("Back to console", null, (_, _) => EnterConsole());
+                menu.Items.Add("Restart the frontend", null, (_, _) =>
+                {
+                    lock (Sync) { try { _frontend?.Kill(true); } catch { /* already gone */ } }
+                });
+                menu.Items.Add(new ToolStripSeparator());
+                menu.Items.Add("Sleep", null, (_, _) => SetSuspendState(false, false, false));
+
+                Icon icon;
+                try { icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? SystemIcons.Application; }
+                catch { icon = SystemIcons.Application; }
+
+                _trayIcon = new NotifyIcon
+                {
+                    Icon = icon,
+                    Text = "consolize: desktop mode",
+                    Visible = true,
+                    ContextMenuStrip = menu,
+                };
+                _trayIcon.DoubleClick += (_, _) => EnterConsole();
+                _trayIcon.ShowBalloonTip(5000, "consolize",
+                    "Desktop mode. Double-click here to go back to the console.", ToolTipIcon.Info);
+
+                Application.Run(new ApplicationContext());
+            }
+            catch (Exception ex)
+            {
+                Log($"tray icon failed (ignored): {ex.Message}");
+            }
+            finally
+            {
+                try { _trayIcon?.Dispose(); } catch { }
+                _trayIcon = null;
+                _trayHost = null;
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "consolize-tray",
+        };
+        _trayThread.SetApartmentState(ApartmentState.STA);
+        _trayThread.Start();
+    }
+
+    private static void HideTray()
+    {
+        var host = _trayHost;
+        if (host is null) return;
+        try
+        {
+            if (host.InvokeRequired) host.BeginInvoke(new Action(CloseTrayCore));
+            else CloseTrayCore();
+        }
+        catch (Exception ex)
+        {
+            Log($"could not close the tray icon: {ex.Message}");
+        }
+    }
+
+    private static void CloseTrayCore()
+    {
+        try { if (_trayIcon is not null) _trayIcon.Visible = false; } catch { }
+        Application.ExitThread();
+    }
+
+    [System.Runtime.InteropServices.DllImport("powrprof.dll", SetLastError = true)]
+    private static extern bool SetSuspendState(bool hibernate, bool forceCritical, bool disableWakeEvent);
+
     // ----- desktop on demand ------------------------------------------------
     // Under Shell Launcher the Winlogon Shell value still points at explorer.exe,
     // so spawning explorer.exe yields the full desktop (taskbar included) and
@@ -441,6 +529,7 @@ internal static class Program
     private static void EnterDesktop()
     {
         _mode = SessionMode.Desktop;
+        ShowTray();
         if (ExplorerRunningInThisSession()) return;
 
         try
@@ -461,6 +550,7 @@ internal static class Program
     private static void EnterConsole()
     {
         _mode = SessionMode.Console;
+        HideTray();
         var session = Process.GetCurrentProcess().SessionId;
         foreach (var p in Process.GetProcessesByName("explorer"))
         {
@@ -468,7 +558,10 @@ internal static class Program
             {
                 if (p.SessionId == session)
                 {
-                    p.Kill(true);
+                    // Kill explorer alone, never its tree: everything the user
+                    // launched from the desktop hangs off it, up to and
+                    // including the frontend we are about to return to.
+                    p.Kill();
                     Log($"explorer (pid {p.Id}) terminated (console mode)");
                 }
             }
@@ -559,6 +652,10 @@ internal static class Program
             case "restart":
                 lock (Sync) { try { _frontend?.Kill(true); } catch { /* already gone */ } }
                 return "ok: frontend killed, watchdog will relaunch it";
+
+            case "sleep":
+                Task.Run(() => { Thread.Sleep(300); SetSuspendState(false, false, false); });
+                return "ok: suspending";
 
             case "quit":
                 Task.Run(() =>

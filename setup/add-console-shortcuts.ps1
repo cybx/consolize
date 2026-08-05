@@ -1,0 +1,158 @@
+<#
+Puts "Desktop Mode" inside the frontend, and a way back on the desktop, so
+switching between the two never needs a keyboard.
+
+  In Steam Big Picture : a non-Steam shortcut named "Desktop Mode", navigable
+                         with the controller like any other library entry
+  On the Windows desktop: "Back to Console Mode.lnk"
+  In the tray           : the session manager shows an icon while the desktop is
+                         up (double-click returns to the console)
+
+Steam keeps non-Steam shortcuts per Steam account in a binary VDF, and rewrites
+that file from memory when it closes, so Steam has to be closed while we write.
+The existing file is backed up next to itself first.
+
+Runs as the console account (its own Steam profile), no admin needed.
+
+  .\add-console-shortcuts.ps1
+  .\add-console-shortcuts.ps1 -Force   # close Steam automatically
+#>
+param(
+    [string]$ConsolizeExe = 'C:\Program Files\Consolize\consolize.exe',
+    [switch]$Force
+)
+$ErrorActionPreference = 'Stop'
+
+if (-not (Test-Path $ConsolizeExe)) { throw "consolize.exe not found at $ConsolizeExe" }
+
+# --- the way back: a desktop shortcut ---------------------------------------
+
+$shell = New-Object -ComObject WScript.Shell
+$desktop = [Environment]::GetFolderPath('Desktop')
+$backLink = Join-Path $desktop 'Back to Console Mode.lnk'
+$lnk = $shell.CreateShortcut($backLink)
+$lnk.TargetPath = $ConsolizeExe
+$lnk.Arguments = 'send console'
+$lnk.Description = 'Close the desktop and return to the console frontend'
+$lnk.IconLocation = "$ConsolizeExe,0"
+$lnk.Save()
+Write-Host "Desktop shortcut: $backLink"
+
+# --- the way out: a non-Steam shortcut --------------------------------------
+
+function Get-SteamPath {
+    foreach ($dir in @(
+        (Get-ItemProperty 'HKCU:\SOFTWARE\Valve\Steam' -Name SteamPath -ErrorAction SilentlyContinue).SteamPath,
+        (Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam' -Name InstallPath -ErrorAction SilentlyContinue).InstallPath,
+        'C:\Program Files (x86)\Steam'
+    )) {
+        if (-not $dir) { continue }
+        $dir = $dir -replace '/', '\'
+        if (Test-Path (Join-Path $dir 'steam.exe')) { return $dir }
+    }
+    return $null
+}
+
+# Binary VDF: 0x00 opens a map, 0x01 marks a string field, 0x02 a 32-bit int,
+# 0x08 closes a map. Keys and values are NUL terminated.
+function Add-VdfString {
+    param([System.IO.BinaryWriter]$W, [string]$Key, [string]$Value)
+    $W.Write([byte]1)
+    $W.Write([Text.Encoding]::UTF8.GetBytes($Key)); $W.Write([byte]0)
+    $W.Write([Text.Encoding]::UTF8.GetBytes($Value)); $W.Write([byte]0)
+}
+function Add-VdfInt {
+    param([System.IO.BinaryWriter]$W, [string]$Key, [int]$Value)
+    $W.Write([byte]2)
+    $W.Write([Text.Encoding]::UTF8.GetBytes($Key)); $W.Write([byte]0)
+    $W.Write([BitConverter]::GetBytes($Value))
+}
+
+$steam = Get-SteamPath
+if (-not $steam) {
+    Write-Warning 'Steam not found, only the desktop shortcut was created.'
+    return
+}
+
+$steamProc = Get-Process steam -ErrorAction SilentlyContinue
+if ($steamProc) {
+    if (-not $Force) {
+        Write-Warning 'Steam is running and would overwrite this file when it closes.'
+        $answer = Read-Host 'Close Steam now and continue? [Y/n]'
+        if ($answer -match '^[nN]') { Write-Host 'Skipped the Steam shortcut.'; return }
+    }
+    Write-Host 'Closing Steam...'
+    $steamProc | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 5
+}
+
+$userDirs = @(Get-ChildItem (Join-Path $steam 'userdata') -Directory -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -ne '0' })
+if (-not $userDirs) {
+    Write-Warning 'No Steam user profile found (sign in to Steam first). Only the desktop shortcut was created.'
+    return
+}
+
+foreach ($userDir in $userDirs) {
+    $configDir = Join-Path $userDir.FullName 'config'
+    New-Item -ItemType Directory -Force -Path $configDir | Out-Null
+    $vdf = Join-Path $configDir 'shortcuts.vdf'
+
+    if (Test-Path $vdf) {
+        $existing = [IO.File]::ReadAllBytes($vdf)
+        if ([Text.Encoding]::UTF8.GetString($existing) -match 'Desktop Mode') {
+            Write-Host "  $($userDir.Name): already has the Desktop Mode entry, leaving it alone."
+            continue
+        }
+        $backup = "$vdf.consolize-backup"
+        if (-not (Test-Path $backup)) { Copy-Item $vdf $backup }
+        Write-Warning "  $($userDir.Name): this profile already has non-Steam shortcuts."
+        Write-Warning "  Backed up to $backup, but adding entries to an existing file is not"
+        Write-Warning '  supported here. Add "Desktop Mode" from Big Picture instead:'
+        Write-Warning "    target: $ConsolizeExe   arguments: send desktop"
+        continue
+    }
+
+    $stream = [IO.File]::Open($vdf, 'Create')
+    $w = New-Object System.IO.BinaryWriter($stream)
+    try {
+        $w.Write([byte]0)
+        $w.Write([Text.Encoding]::UTF8.GetBytes('shortcuts')); $w.Write([byte]0)
+
+        $w.Write([byte]0)
+        $w.Write([Text.Encoding]::UTF8.GetBytes('0')); $w.Write([byte]0)
+
+        Add-VdfString $w 'AppName' 'Desktop Mode'
+        Add-VdfString $w 'Exe' "`"$ConsolizeExe`""
+        Add-VdfString $w 'StartDir' "`"$(Split-Path $ConsolizeExe)`""
+        Add-VdfString $w 'icon' $ConsolizeExe
+        Add-VdfString $w 'ShortcutPath' ''
+        Add-VdfString $w 'LaunchOptions' 'send desktop'
+        Add-VdfInt $w 'IsHidden' 0
+        Add-VdfInt $w 'AllowDesktopConfig' 1
+        Add-VdfInt $w 'AllowOverlay' 1
+        Add-VdfInt $w 'OpenVR' 0
+        Add-VdfInt $w 'Devkit' 0
+        Add-VdfString $w 'DevkitGameID' ''
+        Add-VdfInt $w 'DevkitOverrideAppID' 0
+        Add-VdfInt $w 'LastPlayTime' 0
+        Add-VdfString $w 'FlatpakAppID' ''
+
+        # empty tags map
+        $w.Write([byte]0)
+        $w.Write([Text.Encoding]::UTF8.GetBytes('tags')); $w.Write([byte]0)
+        $w.Write([byte]8)
+
+        $w.Write([byte]8)   # close entry 0
+        $w.Write([byte]8)   # close shortcuts
+    } finally {
+        $w.Dispose(); $stream.Dispose()
+    }
+    Write-Host "  $($userDir.Name): 'Desktop Mode' added to the Steam library."
+}
+
+Write-Host ''
+Write-Host 'Switching, from now on:' -ForegroundColor Green
+Write-Host '  console -> desktop : "Desktop Mode" in the Steam library'
+Write-Host '  desktop -> console : the tray icon (double-click) or the desktop shortcut'
+Write-Host '  either way, a reboot always comes back to the console'

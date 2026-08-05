@@ -119,6 +119,16 @@ if (-not $steam) {
         if ($bigPictureOk) {
             Write-Host '  Big Picture confirmed.' -ForegroundColor Green
             $script:loginConfirmed = $true
+
+            # Steam owns shortcuts.vdf while it runs and rewrites it on exit,
+            # so the entry has to be added with Steam closed. We are about to
+            # reboot anyway.
+            $shortcuts = Join-Path $here 'add-console-shortcuts.ps1'
+            if (Test-Path $shortcuts) {
+                Write-Host ''
+                Write-Host '==> Adding "Desktop Mode" to the Steam library' -ForegroundColor Cyan
+                & $shortcuts -Force
+            }
             # Steam re-adds its autostart entry once it runs
             foreach ($p in (Get-ItemProperty $runKey -ErrorAction SilentlyContinue).PSObject.Properties) {
                 if ($p.Name -like 'PS*') { continue }

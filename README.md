@@ -21,7 +21,10 @@ This project targets **Windows 11 Enterprise / Education / IoT Enterprise (LTSC 
 
 1. It launches the configured frontend (Steam Big Picture by default; Playnite Fullscreen, Hydra or any executable via config).
 2. It watches the frontend and relaunches it if it crashes, with a crash-loop breaker that falls back to the desktop instead of flapping forever.
-3. "Desktop mode" is on demand: `consolize send desktop` starts Explorer, `consolize send console` kills it and returns to the frontend. Add these as non-Steam shortcuts and you can hop between modes from the couch.
+3. "Desktop mode" is on demand, the way SteamOS does it, and reachable without a keyboard:
+   - **console to desktop:** a "Desktop Mode" entry sits in the Steam library, added automatically during setup. Pick it with the controller and Explorer starts.
+   - **desktop to console:** the session manager shows a tray icon while the desktop is up (double-click it), and setup also drops a "Back to Console Mode" shortcut on the desktop.
+   - a reboot always comes back to the console, so a session left in desktop mode is never a trap.
 4. It exposes a named pipe (`ping`, `status`, `desktop`, `console`, `restart`, `quit`) so scripts and future tooling can drive the session.
 
 No `Winlogon\Shell` registry rewrite, no scheduled task launching a VBS that launches a batch, no fixed 20-second sleeps.
