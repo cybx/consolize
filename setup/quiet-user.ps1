@@ -31,4 +31,26 @@ Set-RegValue 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryMan
 Set-RegValue 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'SystemPaneSuggestionsEnabled' 0
 Set-RegValue 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'SoftLandingEnabled' 0
 
+Write-Host 'Touch keyboard pops up on any text field (no physical keyboard needed)...'
+# Windows only auto-invokes the touch keyboard on tablets by default. On a
+# couch PC there is no keyboard at all, so make it appear whenever a text field
+# takes focus, in any app.
+Set-RegValue 'HKCU:\SOFTWARE\Microsoft\TabletTip\1.7' 'EnableDesktopModeAutoInvoke' 1
+# Bigger keys, since this is read from three metres away
+Set-RegValue 'HKCU:\SOFTWARE\Microsoft\TabletTip\1.7' 'KeyboardLayoutPreference' 0
+
+Write-Host ''
+Write-Host 'Typing from the couch, what each layer gives you:' -ForegroundColor Cyan
+Write-Host '  Inside Steam Big Picture: Steam draws its own gamepad keyboard. Nothing to do.'
+Write-Host '  Inside Playnite Fullscreen: it has its own on-screen keyboard too.'
+Write-Host '  Anywhere else (Windows dialogs, other launchers): the Windows touch keyboard'
+Write-Host '  now opens by itself on text fields, but it is driven by mouse or touch, not'
+Write-Host '  by a gamepad. Two ways to point at it without getting up:'
+Write-Host '    - Steam > Settings > Controller > Desktop layout: bind a chord (Guide + X'
+Write-Host '      works well) to "Show On-Screen Keyboard". Steam then draws ITS keyboard'
+Write-Host '      over the desktop, fully gamepad navigable.'
+Write-Host '    - the same Desktop layout gives the right stick mouse control for anything'
+Write-Host '      that still needs a pointer.'
+Write-Host '  That binding lives in your Steam cloud config, so it cannot be scripted here.'
+Write-Host ''
 Write-Host 'Done. Sign out and back in for everything to apply.'

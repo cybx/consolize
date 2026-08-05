@@ -272,6 +272,9 @@ if ($a.Torrent) { $selection += 'torrent' }
 Step 'Quiet layer'
 & (Join-Path $here 'quiet-machine.ps1')
 
+Step 'Silent boot (no logo, no welcome screen)'
+& (Join-Path $here 'boot-silent.ps1')
+
 Step 'Defender'
 if ($a.Defender -eq 'disable') { & (Join-Path $here 'tune-defender.ps1') -Disable -Yes:$false }
 else { & (Join-Path $here 'tune-defender.ps1') }

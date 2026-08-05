@@ -61,15 +61,22 @@ function Get-SteamPath {
 
 function Test-SteamLogin {
     param([string]$SteamDir)
+    # What matters is that Steam signs in on its own next launch. The modern
+    # client records that as AutoLogin or RememberPassword in loginusers.vdf
+    # plus AutoLoginUser under this Windows user. Do not require the
+    # RememberPassword checkbox alone: the QR sign-in never shows one, and
+    # ssfn files are gone since Steam moved to refresh tokens.
+    $auto = (Get-ItemProperty 'HKCU:\SOFTWARE\Valve\Steam' -Name AutoLoginUser -ErrorAction SilentlyContinue).AutoLoginUser
+    if (-not $auto) { return $false }
+
     $vdf = Join-Path $SteamDir 'config\loginusers.vdf'
     if (-not (Test-Path $vdf)) { return $false }
     $raw = Get-Content $vdf -Raw
-    if ($raw -notmatch '"RememberPassword"\s+"1"') { return $false }
-    # the account also has to be this Windows user's autologin account
-    $auto = (Get-ItemProperty 'HKCU:\SOFTWARE\Valve\Steam' -Name AutoLoginUser -ErrorAction SilentlyContinue).AutoLoginUser
-    return [bool]$auto
+    if ($raw -notmatch '"AccountName"\s+"') { return $false }
+    return ($raw -match '"(RememberPassword|AutoLogin)"\s+"1"')
 }
 
+$script:loginConfirmed = $false
 $steam = Get-SteamPath
 if (-not $steam) {
     Write-Warning 'Steam is not installed. Run bootstrap-gaming.ps1 as admin first.'
@@ -78,21 +85,40 @@ if (-not $steam) {
     Write-Host '==> Steam login for this account' -ForegroundColor Cyan
     if (Test-SteamLogin $steam) {
         Write-Host '  already signed in on this account.'
+        $script:loginConfirmed = $true
     } else {
         Write-Host '  Steam keeps its login per Windows user, so this account needs its own.'
-        Write-Host '  Sign in with "Remember me" ticked and clear any Steam Guard code.'
-        Write-Host '  Without it, the console boots into a login window a controller cannot fill in.'
+        Write-Host '  Two-factor and the QR code are both fine: Steam Guard asks once per'
+        Write-Host '  machine and then stores a token, so the console never asks again.'
+        Write-Host '  Scanning the QR with the Steam mobile app is the easiest here, since'
+        Write-Host '  it skips typing a password on a TV.'
         Write-Host ''
         Start-Process (Join-Path $steam 'steam.exe')
 
-        Write-Host '  Waiting for the sign-in (close this window to skip)...'
+        Write-Host '  Waiting for the sign-in. Press Enter once you are in and I will check.'
         $waited = 0
         while (-not (Test-SteamLogin $steam) -and $waited -lt 1800) {
-            Start-Sleep -Seconds 5
-            $waited += 5
+            if ($Host.UI.RawUI.KeyAvailable) {
+                $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+                if (Test-SteamLogin $steam) { break }
+                Write-Host '  not signed in yet as far as I can tell, still waiting...'
+            }
+            Start-Sleep -Seconds 3
+            $waited += 3
         }
-        if (Test-SteamLogin $steam) {
-            Write-Host '  signed in.' -ForegroundColor Green
+
+        # Heuristics can be wrong; the real acceptance test is whether Big
+        # Picture comes up, so ask the one question that actually settles it.
+        Write-Host ''
+        Write-Host '  Opening Big Picture to confirm the console will start clean...'
+        Start-Process (Join-Path $steam 'steam.exe') -ArgumentList '-bigpicture'
+        Start-Sleep -Seconds 12
+        $confirm = Read-Host '  Did Big Picture open, signed in, with no login screen? [Y/n]'
+        $bigPictureOk = $confirm -notmatch '^[nN]'
+
+        if ($bigPictureOk) {
+            Write-Host '  Big Picture confirmed.' -ForegroundColor Green
+            $script:loginConfirmed = $true
             # Steam re-adds its autostart entry once it runs
             foreach ($p in (Get-ItemProperty $runKey -ErrorAction SilentlyContinue).PSObject.Properties) {
                 if ($p.Name -like 'PS*') { continue }
@@ -101,12 +127,14 @@ if (-not $steam) {
                 }
             }
         } else {
-            Write-Warning '  no sign-in detected. Do it before enabling the shell, or the first boot strands you.'
+            Write-Warning '  Big Picture did not come up clean, so the shell will not be replaced.'
         }
     }
 }
 
-$steamReady = $steam -and (Test-SteamLogin $steam)
+# Trust what was actually seen on screen over the file heuristics: the QR
+# sign-in and some Steam Guard flows do not write the checkbox key at all.
+$steamReady = $script:loginConfirmed
 if ($steamReady) {
     # only mark this done when it actually finished: otherwise the task should
     # run again at the next logon instead of silently skipping itself
