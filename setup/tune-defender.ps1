@@ -31,6 +31,10 @@ param(
     [string[]]$ExtraPaths,
     [Alias('DisableRealtime')] [switch]$Disable,
     [switch]$Yes,
+    # The caller already asked and got a yes (setup-console's interview), so do
+    # not ask again; Tamper Protection is still handled interactively, because
+    # nothing else can.
+    [switch]$Confirmed,
     [switch]$Restore
 )
 $ErrorActionPreference = 'Stop'
@@ -173,7 +177,7 @@ Write-Host 'This machine will have no antivirus. Fine for a console-style PC tha
 Write-Host 'only runs games from stores you trust; a bad idea if it doubles as your'
 Write-Host 'download-anything desktop. Undo anytime with -Restore.'
 
-if (-not $Yes) {
+if (-not $Yes -and -not $Confirmed) {
     $answer = Read-Host 'Type DISABLE to continue'
     if ($answer -ne 'DISABLE') { Write-Host 'Aborted, Defender left on (tuning above still applied).'; return }
 }
