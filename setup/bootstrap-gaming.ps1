@@ -15,10 +15,14 @@ Items:
   directx   DirectX End-User Runtime (legacy d3dx9/xaudio for older titles)
   steam     Steam
   playnite  Playnite (only if you plan the Playnite frontend)
+  defender  Stop Defender from costing frames: exclude game libraries and
+            shader caches, scans only when idle, no scheduled scan
+            (see tune-defender.ps1 for turning it off entirely)
 
 Written for Windows PowerShell 5.1 (a fresh install has no pwsh 7).
-Note: on IoT LTSC winget/App Installer may be missing; the script tells you
-where to get it (https://aka.ms/getwinget) instead of guessing.
+winget is bootstrapped automatically when missing (IoT LTSC ships without
+it): first re-register the provisioned package if present, else the official
+Repair-WinGetPackageManager cmdlet, else direct msixbundle download.
 #>
 param(
     [ValidateSet('recommended', 'all', 'minimal')]
@@ -28,6 +32,59 @@ $ErrorActionPreference = 'Stop'
 
 function Test-Winget {
     return [bool](Get-Command winget -ErrorAction SilentlyContinue)
+}
+
+function Ensure-Winget {
+    if (Test-Winget) { return }
+    Write-Host '>> winget not found, bootstrapping it...' -ForegroundColor Cyan
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+
+    # Route 1: App Installer is provisioned but not registered for this user
+    try {
+        Add-AppxPackage -RegisterByFamilyName -MainPackage 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe' -ErrorAction Stop
+    } catch { }
+    if (Test-Winget) { Write-Host 'winget registered from the provisioned package.'; return }
+
+    # Route 2: official repair cmdlet (downloads latest winget + dependencies)
+    try {
+        if (-not (Get-Module -ListAvailable Microsoft.WinGet.Client)) {
+            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null
+            Install-Module Microsoft.WinGet.Client -Force -Scope AllUsers
+        }
+        Import-Module Microsoft.WinGet.Client
+        Repair-WinGetPackageManager -AllUsers -Latest -Force
+    } catch {
+        Write-Warning "WinGet module route failed ($($_.Exception.Message)), trying direct download..."
+
+        # Route 3: msixbundle + dependencies straight from Microsoft.
+        # If Add-AppxPackage ever complains about a newer dependency, bump the
+        # Microsoft.UI.Xaml release URL below.
+        $tmp = Join-Path $env:TEMP 'consolize-winget'
+        New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+        $oldProgress = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
+        try {
+            $vclibs = Join-Path $tmp 'vclibs.appx'
+            $xaml = Join-Path $tmp 'uixaml.appx'
+            $bundle = Join-Path $tmp 'winget.msixbundle'
+            Invoke-WebRequest 'https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx' -OutFile $vclibs -UseBasicParsing
+            Invoke-WebRequest 'https://github.com/microsoft/microsoft-ui-xaml/releases/download/v2.8.6/Microsoft.UI.Xaml.2.8.x64.appx' -OutFile $xaml -UseBasicParsing
+            Invoke-WebRequest 'https://aka.ms/getwinget' -OutFile $bundle -UseBasicParsing
+            Add-AppxPackage -Path $bundle -DependencyPath $vclibs, $xaml
+        } finally {
+            $ProgressPreference = $oldProgress
+        }
+    }
+
+    if (-not (Test-Winget)) {
+        # freshly registered store apps sometimes need the WindowsApps shim path
+        $shim = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\winget.exe'
+        if (Test-Path $shim) { Set-Alias -Name winget -Value $shim -Scope Script }
+    }
+    if (-not (Test-Winget)) {
+        throw 'Could not install winget automatically. Install "App Installer" from https://aka.ms/getwinget and re-run.'
+    }
+    Write-Host 'winget ready.'
 }
 
 function Install-FirstAvailable {
@@ -54,13 +111,14 @@ $items = [ordered]@{
     directx  = @{ Label = 'DirectX End-User Runtime (older titles)';     Recommended = $true }
     steam    = @{ Label = 'Steam';                                       Recommended = $true }
     playnite = @{ Label = 'Playnite';                                    Recommended = $false }
+    defender = @{ Label = 'Defender tuning (exclusions + idle-only scans)'; Recommended = $true }
 }
 $recommendedKeys = @($items.Keys | Where-Object { $items[$_].Recommended })
 
 $selected = $null
 switch ($Preset) {
     'all'         { $selected = @($items.Keys) }
-    'minimal'     { $selected = @('vcredist', 'steam') }
+    'minimal'     { $selected = @('vcredist', 'steam', 'defender') }
     'recommended' { $selected = $recommendedKeys }
 }
 
@@ -79,13 +137,15 @@ if (-not $selected) {
 }
 
 if (-not $selected -or $selected.Count -eq 0) { Write-Host 'Nothing selected, bye.'; return }
+
+# order matters: Defender exclusions need the game folders to already exist
+$order = @('updates', 'gpu', 'vcredist', 'directx', 'steam', 'playnite', 'defender')
+$selected = $order | Where-Object { $selected -contains $_ }
 Write-Host ''
 Write-Host ("Installing: " + ($selected -join ', ')) -ForegroundColor Green
 
 $needsWinget = @($selected | Where-Object { $_ -ne 'updates' }).Count -gt 0
-if ($needsWinget -and -not (Test-Winget)) {
-    throw 'winget not found. On IoT LTSC install "App Installer" first: https://aka.ms/getwinget, then re-run.'
-}
+if ($needsWinget) { Ensure-Winget }
 
 foreach ($key in $selected) {
     switch ($key) {
@@ -104,6 +164,10 @@ foreach ($key in $selected) {
                 'Intel'  { Install-FirstAvailable @('Intel.IntelDriverAndSupportAssistant') 'Intel Driver & Support Assistant' }
                 default  { Write-Warning 'No supported GPU detected, skipping driver step.' }
             }
+        }
+        'defender' {
+            # runs last on purpose: exclusions need the game folders to exist
+            & (Join-Path $PSScriptRoot 'tune-defender.ps1')
         }
         'updates' {
             Write-Host '>> Windows updates (PSWindowsUpdate)...' -ForegroundColor Cyan

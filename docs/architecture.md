@@ -10,7 +10,9 @@
 
 4. **Autologon via LSA secret, never plaintext.** The classic `DefaultPassword` registry value stores the password in cleartext. Sysinternals Autologon stores it as an LSA secret. F2 automates that.
 
-5. **Rest mode strategy.** Sleep (S0ix/S3) where the firmware is trustworthy; hibernate as the robust fallback: on NVMe it resumes in ~15s with the game exactly where it was, and it survives power loss. Known trade: the 8BitDo 2.4G receiver can wake the PC from *sleep* (enable "Allow this device to wake the computer" on the receiver), but nothing wakes from *hibernate* via USB; that is the case power button or an HDMI-CEC adapter.
+5. **Defender: exclusions over "disable it".** Since Windows 10 2004, Tamper Protection makes real-time protection un-scriptable by design: `DisableAntiSpyware` and `Set-MpPreference -DisableRealtimeMonitoring` are silently ignored while it is on, and it can only be turned off by hand in the Windows Security UI. Scripts that claim to disable Defender either fail quietly or ship a hack. Nearly all of the stutter comes from real-time scanning of game reads and shader compilation plus scheduled scans firing mid-session, so `setup/tune-defender.ps1` defaults to exclusions (every Steam library parsed from `libraryfolders.vdf`, Playnite, Epic, DX/GL shader caches) plus scan discipline (idle only, 5% CPU cap, scheduled scan task disabled). Turning real-time protection fully off stays available behind `-DisableRealtime`, which detects Tamper Protection and explains the manual step instead of pretending to succeed.
+
+6. **Rest mode strategy.** Sleep (S0ix/S3) where the firmware is trustworthy; hibernate as the robust fallback: on NVMe it resumes in ~15s with the game exactly where it was, and it survives power loss. Known trade: the 8BitDo 2.4G receiver can wake the PC from *sleep* (enable "Allow this device to wake the computer" on the receiver), but nothing wakes from *hibernate* via USB; that is the case power button or an HDMI-CEC adapter.
 
 ## Requirements learned from the field (GamesDows issue tracker)
 
@@ -23,7 +25,7 @@
 ## Phases
 
 - **F1 (this repo, WIP): session manager.** Watchdog + crash-loop breaker + named-pipe control (`ping|status|desktop|console|restart|quit`) + frontend autodetect (Steam registry, Playnite, custom).
-- **F2: quiet layer.** Idempotent PowerShell: Game Bar off, Do Not Disturb always on, Windows Update discipline (nightly window, never auto-reboot), lock screen and boot UI off, LSA autologon. First pass shipped: `setup/quiet-machine.ps1`, `setup/quiet-user.ps1`, `setup/set-autologon.ps1`.
+- **F2: quiet layer.** Idempotent PowerShell: Game Bar off, Do Not Disturb always on, Windows Update discipline (nightly window, never auto-reboot), lock screen and boot UI off, LSA autologon. First pass shipped: `setup/quiet-machine.ps1`, `setup/quiet-user.ps1`, `setup/set-autologon.ps1`, `setup/tune-defender.ps1`.
 - **F3: power.** powercfg profile (power button = sleep/hibernate, no password on wake), nightly maintenance window aligned with Steam's update schedule, wake-by-controller documentation per receiver.
 - **F4: controller-first quick settings.** Gamepad-navigable mini app for Bluetooth pairing, audio output switching, volume and wifi, launchable from inside Big Picture (non-Steam shortcut that talks to the consolize pipe). This is the piece nobody has built for Windows.
 - **F0: provisioning.** `autounattend.xml` for IoT Enterprise LTSC: local account, drivers, Steam, consolize, quiet layer, all from first boot. The repo becomes "the ISO recipe for your console". The app/driver layer already exists as `setup/bootstrap-gaming.ps1`: GPU vendor autodetect (NVIDIA/AMD/Intel), VC++ runtimes, DirectX runtime, Steam/Playnite and Windows updates, interactive with recommended defaults or `-Preset` for automation.
