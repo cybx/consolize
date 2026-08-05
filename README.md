@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo-dark.png" alt="consolize" width="560">
+</p>
+
 # consolize
 
 Turn a Windows 11 PC into a couch gaming console. The machine boots straight into Steam Big Picture (or Playnite Fullscreen), survives frontend crashes without ever showing a black screen or a desktop, and Explorer only appears when you explicitly ask for it.
@@ -25,7 +29,24 @@ This project targets **Windows 11 Enterprise / Education / IoT Enterprise (LTSC 
    - **console to desktop:** a "Desktop Mode" entry sits in the Steam library, added automatically during setup. Pick it with the controller and Explorer starts.
    - **desktop to console:** the session manager shows a tray icon while the desktop is up (double-click it), and setup also drops a "Back to Console Mode" shortcut on the desktop.
    - a reboot always comes back to the console, so a session left in desktop mode is never a trap.
-4. It exposes a named pipe (`ping`, `status`, `desktop`, `console`, `restart`, `quit`) so scripts and future tooling can drive the session.
+4. It exposes a named pipe (`ping`, `status`, `desktop`, `console`, `restart`, `sleep`, `panel`, `quit`) so scripts and future tooling can drive the session.
+
+### Quick Settings
+
+`consolize panel` opens a fullscreen panel built for a gamepad: d-pad or left
+stick to move, A to select, B to close, LB and RB to change page. It is added to
+the Steam library during setup, so it is reachable from the couch.
+
+| Page | What it does |
+|---|---|
+| Sound | Switch output device (TV, headset, receiver) and set volume |
+| Bluetooth | Scan, pair and forget devices without the Settings app |
+| Network | Connect to a saved wifi network |
+| Power | Back to console, desktop mode, restart frontend, sleep, restart, shut down |
+
+`consolize panel --diag` prints what it can see (audio devices, Bluetooth radio,
+XInput availability) without opening a window, which is the quick way to check a
+machine.
 
 No `Winlogon\Shell` registry rewrite, no scheduled task launching a VBS that launches a batch, no fixed 20-second sleeps.
 
@@ -36,7 +57,7 @@ No `Winlogon\Shell` registry rewrite, no scheduled task launching a VBS that lau
 | F1 | Session manager (watchdog shell + desktop on demand) | **WIP, this repo** |
 | F2 | Quiet layer (Game Bar off, DND, update discipline, autologon via LSA, boot UI) | **first pass in `setup/`** |
 | F3 | Power: rest mode (sleep/hibernate profile, wake by controller, no core parking) | **first pass in `setup/`** |
-| F4 | Controller-first quick settings (Bluetooth pairing, audio output, volume, wifi) without touching a desktop | planned |
+| F4 | Controller-first quick settings (Bluetooth pairing, audio output, volume, wifi) without touching a desktop | **shipped** |
 | F0 | Provisioning: gaming bootstrap (GPU driver, runtimes, updates) + `autounattend.xml` | **bootstrap in `setup/`**, autounattend pending |
 | F5 | Remote maintenance (OpenSSH, second admin account, clean uninstall) | planned |
 

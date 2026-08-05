@@ -115,6 +115,16 @@ New-Item -ItemType Directory -Force -Path $ScriptDir | Out-Null
 Copy-Item (Join-Path $extracted.FullName 'setup\*.ps1') $ScriptDir -Force
 Write-Host "Setup scripts installed to $ScriptDir"
 
+# The boot splash: Windows' own logo is switched off, so this is what the
+# machine shows on the way up.
+$splashSource = Join-Path $extracted.FullName 'assets\splash.png'
+if (Test-Path $splashSource) {
+    $stateDir = Join-Path $env:ProgramData 'Consolize'
+    New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
+    Copy-Item $splashSource (Join-Path $stateDir 'splash.png') -Force
+    Write-Host "Boot splash installed to $stateDir\splash.png"
+}
+
 if ($exeSource) {
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
     Copy-Item $exeSource (Join-Path $InstallDir 'consolize.exe') -Force

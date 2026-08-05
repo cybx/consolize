@@ -84,7 +84,17 @@ internal static class Program
 
         if (args.Length >= 1 && (args[0] == "--version" || args[0] == "-v"))
         {
-            Console.WriteLine("consolize 0.1.0");
+            Console.WriteLine("consolize 0.6.0");
+            return 0;
+        }
+
+        if (args.Length >= 1 && args[0].Equals("panel", StringComparison.OrdinalIgnoreCase))
+        {
+            if (args.Length >= 2 && args[1] == "--diag") return PanelDiagnostics();
+
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            Application.Run(new QuickSettingsForm());
             return 0;
         }
 
@@ -118,6 +128,55 @@ internal static class Program
         {
             Console.Error.WriteLine($"consolize: could not reach the session manager ({ex.Message})");
             return 1;
+        }
+    }
+
+    /// <summary>Prints what the panel can see, so the interop can be checked
+    /// from a terminal without opening a window.</summary>
+    private static int PanelDiagnostics()
+    {
+        Console.WriteLine("=== audio outputs ===");
+        var outputs = Interop.Audio.GetOutputs();
+        foreach (var device in outputs)
+        {
+            Console.WriteLine($"  {(device.IsDefault ? "*" : " ")} {device.Name}");
+        }
+        Console.WriteLine($"  ({outputs.Count} found)");
+        Console.WriteLine($"  volume: {Interop.Audio.GetVolume()?.ToString() ?? "unavailable"}   muted: {Interop.Audio.GetMute()?.ToString() ?? "unknown"}");
+
+        Console.WriteLine();
+        Console.WriteLine("=== bluetooth ===");
+        Console.WriteLine($"  radio present: {Interop.Bluetooth.RadioPresent()}");
+        var devices = Interop.Bluetooth.GetDevices(scan: false);
+        foreach (var device in devices)
+        {
+            var state = device.Connected ? "connected" : device.Authenticated ? "paired" : "known";
+            Console.WriteLine($"  {device.Name} [{state}] {Interop.Bluetooth.FormatAddress(device.Address)}");
+        }
+        Console.WriteLine($"  ({devices.Count} remembered)");
+
+        Console.WriteLine();
+        Console.WriteLine("=== gamepad ===");
+        var pad = new Interop.Gamepad();
+        pad.Poll();
+        Console.WriteLine($"  XInput available: {Interop.Gamepad.Available}");
+
+        return 0;
+    }
+
+    private static void OpenPanel()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "panel")
+            {
+                UseShellExecute = false,
+            });
+            Log("quick settings panel opened");
+        }
+        catch (Exception ex)
+        {
+            Log($"could not open the panel: {ex.Message}");
         }
     }
 
@@ -454,6 +513,7 @@ internal static class Program
 
                 var menu = new ContextMenuStrip();
                 menu.Items.Add("Back to console", null, (_, _) => EnterConsole());
+                menu.Items.Add("Quick settings", null, (_, _) => OpenPanel());
                 menu.Items.Add("Restart the frontend", null, (_, _) =>
                 {
                     lock (Sync) { try { _frontend?.Kill(true); } catch { /* already gone */ } }
@@ -656,6 +716,10 @@ internal static class Program
             case "sleep":
                 Task.Run(() => { Thread.Sleep(300); SetSuspendState(false, false, false); });
                 return "ok: suspending";
+
+            case "panel":
+                OpenPanel();
+                return "ok: quick settings opened";
 
             case "quit":
                 Task.Run(() =>

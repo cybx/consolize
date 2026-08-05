@@ -113,42 +113,52 @@ foreach ($userDir in $userDirs) {
         continue
     }
 
+    $entries = @(
+        @{ Name = 'Quick Settings'; Args = 'panel' }
+        @{ Name = 'Desktop Mode';   Args = 'send desktop' }
+    )
+
     $stream = [IO.File]::Open($vdf, 'Create')
     $w = New-Object System.IO.BinaryWriter($stream)
     try {
         $w.Write([byte]0)
         $w.Write([Text.Encoding]::UTF8.GetBytes('shortcuts')); $w.Write([byte]0)
 
-        $w.Write([byte]0)
-        $w.Write([Text.Encoding]::UTF8.GetBytes('0')); $w.Write([byte]0)
+        for ($i = 0; $i -lt $entries.Count; $i++) {
+            $entry = $entries[$i]
 
-        Add-VdfString $w 'AppName' 'Desktop Mode'
-        Add-VdfString $w 'Exe' "`"$ConsolizeExe`""
-        Add-VdfString $w 'StartDir' "`"$(Split-Path $ConsolizeExe)`""
-        Add-VdfString $w 'icon' $ConsolizeExe
-        Add-VdfString $w 'ShortcutPath' ''
-        Add-VdfString $w 'LaunchOptions' 'send desktop'
-        Add-VdfInt $w 'IsHidden' 0
-        Add-VdfInt $w 'AllowDesktopConfig' 1
-        Add-VdfInt $w 'AllowOverlay' 1
-        Add-VdfInt $w 'OpenVR' 0
-        Add-VdfInt $w 'Devkit' 0
-        Add-VdfString $w 'DevkitGameID' ''
-        Add-VdfInt $w 'DevkitOverrideAppID' 0
-        Add-VdfInt $w 'LastPlayTime' 0
-        Add-VdfString $w 'FlatpakAppID' ''
+            $w.Write([byte]0)
+            $w.Write([Text.Encoding]::UTF8.GetBytes("$i")); $w.Write([byte]0)
 
-        # empty tags map
-        $w.Write([byte]0)
-        $w.Write([Text.Encoding]::UTF8.GetBytes('tags')); $w.Write([byte]0)
-        $w.Write([byte]8)
+            Add-VdfString $w 'AppName' $entry.Name
+            Add-VdfString $w 'Exe' "`"$ConsolizeExe`""
+            Add-VdfString $w 'StartDir' "`"$(Split-Path $ConsolizeExe)`""
+            Add-VdfString $w 'icon' $ConsolizeExe
+            Add-VdfString $w 'ShortcutPath' ''
+            Add-VdfString $w 'LaunchOptions' $entry.Args
+            Add-VdfInt $w 'IsHidden' 0
+            Add-VdfInt $w 'AllowDesktopConfig' 1
+            Add-VdfInt $w 'AllowOverlay' 1
+            Add-VdfInt $w 'OpenVR' 0
+            Add-VdfInt $w 'Devkit' 0
+            Add-VdfString $w 'DevkitGameID' ''
+            Add-VdfInt $w 'DevkitOverrideAppID' 0
+            Add-VdfInt $w 'LastPlayTime' 0
+            Add-VdfString $w 'FlatpakAppID' ''
 
-        $w.Write([byte]8)   # close entry 0
+            # empty tags map
+            $w.Write([byte]0)
+            $w.Write([Text.Encoding]::UTF8.GetBytes('tags')); $w.Write([byte]0)
+            $w.Write([byte]8)
+
+            $w.Write([byte]8)   # close this entry
+        }
+
         $w.Write([byte]8)   # close shortcuts
     } finally {
         $w.Dispose(); $stream.Dispose()
     }
-    Write-Host "  $($userDir.Name): 'Desktop Mode' added to the Steam library."
+    Write-Host "  $($userDir.Name): 'Quick Settings' and 'Desktop Mode' added to the Steam library."
 }
 
 Write-Host ''
