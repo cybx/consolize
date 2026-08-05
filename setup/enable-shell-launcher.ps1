@@ -18,11 +18,24 @@ param(
     [Parameter(Mandatory)] [string]$UserName,
     [string]$ShellPath = 'C:\Program Files\Consolize\consolize.exe',
     [ValidateSet('RestartShell', 'RestartDevice', 'ShutdownDevice', 'DoNothing')]
-    [string]$OnShellExit = 'RestartShell'
+    [string]$OnShellExit = 'RestartShell',
+    [switch]$SkipPreflight
 )
 $ErrorActionPreference = 'Stop'
 
 if (-not (Test-Path $ShellPath)) { throw "Shell not found at $ShellPath. Run install.ps1 first." }
+
+# Catch the first-boot traps (no saved Steam login, Steam autostarting on its
+# own, no way back in) while a desktop is still there to fix them from.
+if (-not $SkipPreflight) {
+    $preflight = Join-Path $PSScriptRoot 'preflight.ps1'
+    if (Test-Path $preflight) {
+        & $preflight -UserName $UserName -ShellPath $ShellPath
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Preflight found blocking issues (above). Fix them, or re-run with -SkipPreflight if you know what you are doing.'
+        }
+    }
+}
 
 Write-Host 'Enabling the Shell Launcher optional feature (no restart)...'
 dism /online /enable-feature /featurename:Client-EmbeddedShellLauncher /all /norestart | Out-Null

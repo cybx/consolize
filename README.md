@@ -72,6 +72,10 @@ Config lives at `%LOCALAPPDATA%\Consolize\config.json` (created on first run), l
 ./setup/quiet-machine.ps1                 # nothing ever pops over a game, updates at 04:00, quiet boot
 ./setup/tune-defender.ps1                 # game folders excluded, idle-only scans (add -Disable to turn Defender off entirely)
 ./setup/power-console.ps1                 # power button = rest mode, no password on wake, no core parking
+./setup/clean-startup.ps1                 # nothing starts with Windows except the console itself (reversible)
+
+# log into Steam once with "Remember me" before the next step, then:
+./setup/preflight.ps1 -UserName gamer     # catches the first-boot traps while a desktop is still there
 ./setup/set-autologon.ps1 -UserName gamer # autologon with the password stored as an LSA secret (never plaintext)
 ./setup/install.ps1                       # builds and installs consolize.exe
 ./setup/enable-shell-launcher.ps1 -UserName gamer

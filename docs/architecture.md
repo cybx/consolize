@@ -33,6 +33,33 @@
 - **F0: provisioning.** `autounattend.xml` for IoT Enterprise LTSC: local account, drivers, Steam, consolize, quiet layer, all from first boot. The repo becomes "the ISO recipe for your console". The app/driver layer already exists as `setup/bootstrap-gaming.ps1`: GPU vendor autodetect (NVIDIA/AMD/Intel), VC++ runtimes, DirectX runtime, Steam/Playnite and Windows updates, interactive with recommended defaults or `-Preset` for automation.
 - **F5: remote maintenance.** OpenSSH server on, second admin account with the default shell, clean uninstall story.
 
+## First-boot traps (why `preflight.ps1` exists)
+
+Replacing the shell turns small problems into unrecoverable ones, because the
+desktop you would fix them from is gone. The checks worth running while it is
+still there:
+
+- **Steam with no saved login.** `steam.exe -bigpicture` does *not* open Big
+  Picture when there are no cached credentials: it opens the small desktop
+  login window. With no Explorer and a controller in hand, that is a dead end.
+  Preflight parses `config/loginusers.vdf` for `RememberPassword "1"` and fails
+  hard if it is missing. Steam Guard on a brand new machine is the same trap one
+  step later, so launch Steam once and clear the code before flipping the shell.
+- **Steam autostarting on its own.** consolize launches the frontend; a leftover
+  Run entry means two Steams racing at logon. `clean-startup.ps1` always removes
+  Steam entries for that reason.
+- **No way back in.** A second admin account with the default shell is the
+  cheapest insurance; without it the only escape is Ctrl+Shift+Esc into Task
+  Manager and running `explorer.exe` by hand.
+- **Cleartext autologon password.** If some other tool wrote `DefaultPassword`,
+  preflight fails and points at `set-autologon.ps1`, which stores it as an LSA
+  secret instead.
+- **Wrong Windows edition.** No Shell Launcher on Home/Pro, so the whole plan
+  changes.
+
+`enable-shell-launcher.ps1` runs preflight first and refuses to continue on any
+blocking issue unless `-SkipPreflight` is passed.
+
 ## Test lab
 
 **Why not Docker:** Windows containers have no interactive logon session, no GUI and no Shell Launcher; a shell replacement cannot be exercised inside one. The disposable-environment instinct is right, though; the tool that delivers it on a Windows host is **Hyper-V with checkpoints**:

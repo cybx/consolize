@@ -194,6 +194,19 @@ foreach ($key in $selected) {
 }
 
 Write-Host ''
+if ($selected -contains 'steam') {
+    Write-Host 'IMPORTANT before replacing the shell:' -ForegroundColor Yellow
+    Write-Host '  Open Steam once and log in with "Remember me" ticked, then confirm Big'
+    Write-Host '  Picture opens. Without a saved login, the first boot lands on the desktop'
+    Write-Host '  login window with no Explorer behind it, which a controller cannot fill in.'
+    Write-Host '  preflight.ps1 checks this for you.'
+    Write-Host ''
+}
 Write-Host 'Bootstrap finished. Suggested order from here:'
-Write-Host '  .\quiet-machine.ps1  ->  .\set-autologon.ps1 -UserName gamer  ->  .\install.ps1  ->  .\enable-shell-launcher.ps1 -UserName gamer'
+Write-Host '  .\quiet-machine.ps1'
+Write-Host '  .\power-console.ps1'
+Write-Host '  .\clean-startup.ps1'
+Write-Host '  .\set-autologon.ps1 -UserName gamer'
+Write-Host '  .\preflight.ps1 -UserName gamer'
+Write-Host '  .\enable-shell-launcher.ps1 -UserName gamer'
 Write-Host '  (and inside the gamer session, once: .\quiet-user.ps1)'
