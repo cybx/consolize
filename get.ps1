@@ -18,6 +18,10 @@ param(
     [string]$InstallDir = 'C:\Program Files\Consolize',
     [string]$ScriptDir = 'C:\ProgramData\consolize\setup',
     [switch]$DownloadOnly,
+    # Refresh the installed scripts and binary, then stop. The scripts are a
+    # copy taken at install time, so a fix published later does not reach a
+    # machine until they are pulled again.
+    [switch]$UpdateOnly,
     [switch]$NoElevate
 )
 $ErrorActionPreference = 'Stop'
@@ -142,6 +146,15 @@ if ($exeSource) {
 }
 
 Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+
+if ($UpdateOnly) {
+    Write-Host ''
+    Write-Host 'Scripts and binary updated.' -ForegroundColor Green
+    Write-Host 'Nothing else run. To continue a setup you already answered:'
+    Write-Host "    cd '$ScriptDir'"
+    Write-Host '    .\setup-console.ps1 -Unattended'
+    return
+}
 
 Write-Host ''
 Write-Host 'Installed.' -ForegroundColor Green

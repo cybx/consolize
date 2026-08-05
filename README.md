@@ -70,7 +70,15 @@ irm https://raw.githubusercontent.com/cybx/consolize/main/get.ps1 | iex
 ```
 
 No need to open PowerShell as administrator: it asks for elevation itself and
-continues in the elevated window. It installs `consolize.exe` plus every setup
+continues in the elevated window.
+
+The setup scripts are copied to the machine at install time, so a fix published
+later does not reach it on its own. To pull the current ones without starting
+over:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/cybx/consolize/main/get.ps1))) -UpdateOnly
+``` It installs `consolize.exe` plus every setup
 script and then runs the whole provisioning, asking before each part.
 
 You answer a short interview once. Everything after that is automatic, including
