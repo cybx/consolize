@@ -13,7 +13,7 @@ internal enum SessionMode
 
 internal sealed record AppConfig
 {
-    /// <summary>steam | playnite | custom</summary>
+    /// <summary>steam | playnite | hydra | custom</summary>
     public string Frontend { get; init; } = "steam";
 
     /// <summary>Full path of the frontend executable when Frontend = "custom".</summary>
@@ -224,10 +224,19 @@ internal static class Program
             }
             case "playnite":
             {
-                var path = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "Playnite", "Playnite.FullscreenApp.exe");
-                return File.Exists(path) ? (path, "") : null;
+                var path = FindApp("Playnite", "Playnite.FullscreenApp.exe",
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "Playnite", "Playnite.FullscreenApp.exe"));
+                return path is null ? null : (path, "");
+            }
+            case "hydra":
+            {
+                var path = FindApp("Hydra", "Hydra.exe",
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "Programs", "Hydra", "Hydra.exe"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                        "Hydra", "Hydra.exe"));
+                return path is null ? null : (path, "");
             }
             case "custom":
                 return _config.CustomCommand is { Length: > 0 } cmd && File.Exists(cmd)
@@ -237,6 +246,57 @@ internal static class Program
                 Log($"unknown frontend '{_config.Frontend}'");
                 return null;
         }
+    }
+
+    /// <summary>
+    /// Locates an installed app: the given fallback paths first, then the uninstall
+    /// registry (InstallLocation / DisplayIcon), which is where per-user installers
+    /// like Electron apps end up regardless of the folder they chose.
+    /// </summary>
+    private static string? FindApp(string displayNameFragment, string exeName, params string[] candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            if (File.Exists(candidate)) return candidate;
+        }
+
+        foreach (var (hive, subKey) in new[]
+        {
+            (Registry.CurrentUser, @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+            (Registry.LocalMachine, @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+            (Registry.LocalMachine, @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+        })
+        {
+            using var root = hive.OpenSubKey(subKey);
+            if (root is null) continue;
+
+            foreach (var name in root.GetSubKeyNames())
+            {
+                using var app = root.OpenSubKey(name);
+                var displayName = app?.GetValue("DisplayName") as string;
+                if (displayName is null || !displayName.Contains(displayNameFragment, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (app!.GetValue("InstallLocation") as string is { Length: > 0 } location)
+                {
+                    var exe = Path.Combine(location, exeName);
+                    if (File.Exists(exe)) return exe;
+                }
+
+                if (app.GetValue("DisplayIcon") as string is { Length: > 0 } icon)
+                {
+                    var iconPath = icon.Split(',')[0].Trim('"');
+                    var dir = Path.GetDirectoryName(iconPath);
+                    if (dir is not null)
+                    {
+                        var exe = Path.Combine(dir, exeName);
+                        if (File.Exists(exe)) return exe;
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     private static string? FindSteamExe()

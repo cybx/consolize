@@ -19,7 +19,7 @@ This project targets **Windows 11 Enterprise / Education / IoT Enterprise (LTSC 
 
 `consolize.exe` is a small .NET session manager that **is** the shell (via Shell Launcher) for a dedicated gamer account:
 
-1. It launches the configured frontend (Steam Big Picture by default, Playnite or anything else via config).
+1. It launches the configured frontend (Steam Big Picture by default; Playnite Fullscreen, Hydra or any executable via config).
 2. It watches the frontend and relaunches it if it crashes, with a crash-loop breaker that falls back to the desktop instead of flapping forever.
 3. "Desktop mode" is on demand: `consolize send desktop` starts Explorer, `consolize send console` kills it and returns to the frontend. Add these as non-Steam shortcuts and you can hop between modes from the couch.
 4. It exposes a named pipe (`ping`, `status`, `desktop`, `console`, `restart`, `quit`) so scripts and future tooling can drive the session.
@@ -68,9 +68,10 @@ Config lives at `%LOCALAPPDATA%\Consolize\config.json` (created on first run), l
 
 ```powershell
 # as admin, from the repo root, on the machine that will become the console
-./setup/bootstrap-gaming.ps1              # drivers (GPU autodetect), VC++ runtimes, DirectX, Steam, updates, Defender tuning; interactive with recommended defaults (installs winget itself if missing)
+./setup/bootstrap-gaming.ps1              # updates, GPU driver, game runtimes, launchers, media players, tools; interactive with recommended defaults (installs winget itself if missing)
 ./setup/quiet-machine.ps1                 # nothing ever pops over a game, updates at 04:00, quiet boot
 ./setup/tune-defender.ps1                 # game folders excluded, idle-only scans (add -Disable to turn Defender off entirely)
+./setup/tune-performance.ps1              # HAGS, MMCSS game profile, reserved storage (add -Aggressive to strip background services)
 ./setup/power-console.ps1                 # power button = rest mode, no password on wake, no core parking
 ./setup/clean-startup.ps1                 # nothing starts with Windows except the console itself (reversible)
 

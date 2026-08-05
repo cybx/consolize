@@ -1,32 +1,47 @@
 #Requires -RunAsAdministrator
 <#
-Gaming bootstrap (F0). Installs everything a fresh Windows needs to run games
-well. Interactive by default: shows the plan with recommended picks (*) and
-lets the installer choose. Non-interactive: -Preset recommended | all | minimal.
+Gaming bootstrap (F0). Takes a freshly installed Windows and leaves it ready to
+play. Interactive by default: shows the plan with recommended picks (*) and lets
+the installer choose. Non-interactive: -Preset recommended | all | minimal.
 
 Items:
-  updates   Windows/security updates now (PSWindowsUpdate + Microsoft Update)
-  gpu       The right vendor app for the detected GPU, which then installs and
-            keeps the driver updated:
-              NVIDIA -> NVIDIA App (fallback GeForce Experience)
-              AMD    -> Adrenalin auto-detect
-              Intel  -> Driver & Support Assistant
-  vcredist  Visual C++ 2015-2022 redistributables x64 + x86 (most games)
-  directx   DirectX End-User Runtime (legacy d3dx9/xaudio for older titles)
-  steam     Steam
-  playnite  Playnite (only if you plan the Playnite frontend)
-  defender  Defender: tune it (exclusions + idle-only scans) or disable it
-            entirely, asked at run time. -Preset all disables it; any other
-            preset only tunes. See tune-defender.ps1.
+  updates    Windows updates now. Asks whether to install everything or only
+             security and critical fixes. On IoT LTSC "everything" is the usual
+             answer: it only ships quality updates anyway, no feature updates.
+  gpu        The vendor app for the detected GPU, which then installs and keeps
+             the driver updated:
+               NVIDIA -> NVIDIA App (fallback GeForce Experience)
+               AMD    -> Adrenalin auto-detect
+               Intel  -> Driver & Support Assistant
+  runtimes   Everything games link against that Windows does not ship:
+               Visual C++ 2005, 2008, 2010, 2012, 2013 and 2015-2022, x64+x86
+               DirectX End-User Runtime (d3dx9/10/11, XAudio2, XInput 1.3)
+               .NET Framework 3.5 (old launchers) and .NET Desktop Runtime 8
+               XNA Framework and OpenAL (older indies)
+             Note: DirectX 11 and 12 themselves are part of Windows and come
+             from Windows Update. There is no separate DX11/DX12 installer;
+             what games actually miss are the helper libraries above.
+  frontends  Steam, Playnite and/or Hydra, and which one the console boots into
+  media      VLC and mpv. Games ship their own video decoders, so codecs barely
+             matter for playing; they matter when the console doubles as the
+             living room media box. Windows has no HEVC or AV1 decoder out of
+             the box and LTSC has no Store to buy the extensions from, so the
+             fix is players that carry their own decoders. VLC plays everything
+             without touching system codecs, which is also why codec packs
+             (K-Lite and friends) are not worth their side effects here.
+  tools      Git and 7-Zip
+  torrent    qBittorrent plus a torrent folder layout
+  defender   Defender: tune it or disable it entirely, asked at run time
 
 Written for Windows PowerShell 5.1 (a fresh install has no pwsh 7).
-winget is bootstrapped automatically when missing (IoT LTSC ships without
-it): first re-register the provisioned package if present, else the official
+winget is bootstrapped automatically when missing (IoT LTSC ships without it):
+first re-register the provisioned package if present, else the official
 Repair-WinGetPackageManager cmdlet, else direct msixbundle download.
 #>
 param(
-    [ValidateSet('recommended', 'all', 'minimal')]
-    [string]$Preset
+    [ValidateSet('recommended', 'all', 'minimal')] [string]$Preset,
+    [ValidateSet('all', 'security')] [string]$UpdateScope,
+    [string]$ForUser
 )
 $ErrorActionPreference = 'Stop'
 
@@ -105,20 +120,21 @@ elseif ($gpus -match 'Intel') { $gpuVendor = 'Intel' }
 $gpuLabel = if ($gpuVendor) { $gpuVendor } else { 'none detected' }
 
 $items = [ordered]@{
-    updates  = @{ Label = 'Windows/security updates now';                Recommended = $true }
-    gpu      = @{ Label = "GPU driver app (detected: $gpuLabel)";        Recommended = [bool]$gpuVendor }
-    vcredist = @{ Label = 'Visual C++ 2015-2022 x64+x86';                Recommended = $true }
-    directx  = @{ Label = 'DirectX End-User Runtime (older titles)';     Recommended = $true }
-    steam    = @{ Label = 'Steam';                                       Recommended = $true }
-    playnite = @{ Label = 'Playnite';                                    Recommended = $false }
-    defender = @{ Label = 'Defender: tune (default) or disable entirely, asked below'; Recommended = $true }
+    updates   = @{ Label = 'Windows updates (asks: everything or security only)'; Recommended = $true }
+    gpu       = @{ Label = "GPU driver app (detected: $gpuLabel)";                 Recommended = [bool]$gpuVendor }
+    runtimes  = @{ Label = 'Game runtimes (VC++ 2005-2022, DirectX, .NET, XNA, OpenAL)'; Recommended = $true }
+    frontends = @{ Label = 'Game launchers: Steam / Playnite / Hydra';             Recommended = $true }
+    media     = @{ Label = 'VLC and mpv (play anything on the TV, no codec pack)'; Recommended = $true }
+    tools     = @{ Label = 'Git and 7-Zip';                                        Recommended = $true }
+    torrent   = @{ Label = 'qBittorrent plus a torrent folder layout';             Recommended = $false }
+    defender  = @{ Label = 'Defender: tune (default) or disable entirely';         Recommended = $true }
 }
 $recommendedKeys = @($items.Keys | Where-Object { $items[$_].Recommended })
 
 $selected = $null
 switch ($Preset) {
     'all'         { $selected = @($items.Keys) }
-    'minimal'     { $selected = @('vcredist', 'steam', 'defender') }
+    'minimal'     { $selected = @('runtimes', 'frontends', 'defender') }
     'recommended' { $selected = $recommendedKeys }
 }
 
@@ -128,7 +144,7 @@ if (-not $selected) {
     Write-Host 'What should be installed? [Enter/R] = recommended (*), "all", or a comma list of keys:'
     foreach ($k in $items.Keys) {
         $mark = if ($items[$k].Recommended) { '*' } else { ' ' }
-        Write-Host ("  [{0,-8}] {1} {2}" -f $k, $mark, $items[$k].Label)
+        Write-Host ("  [{0,-9}] {1} {2}" -f $k, $mark, $items[$k].Label)
     }
     $answer = Read-Host 'Choice'
     if ([string]::IsNullOrWhiteSpace($answer) -or $answer -match '^[rR]$') { $selected = $recommendedKeys }
@@ -139,8 +155,9 @@ if (-not $selected) {
 if (-not $selected -or $selected.Count -eq 0) { Write-Host 'Nothing selected, bye.'; return }
 
 # order matters: Defender exclusions need the game folders to already exist
-$order = @('updates', 'gpu', 'vcredist', 'directx', 'steam', 'playnite', 'defender')
+$order = @('updates', 'gpu', 'runtimes', 'frontends', 'media', 'tools', 'torrent', 'defender')
 $selected = $order | Where-Object { $selected -contains $_ }
+
 Write-Host ''
 Write-Host ("Installing: " + ($selected -join ', ')) -ForegroundColor Green
 
@@ -149,13 +166,69 @@ if ($needsWinget) { Ensure-Winget }
 
 foreach ($key in $selected) {
     switch ($key) {
-        'vcredist' {
-            Install-FirstAvailable @('Microsoft.VCRedist.2015+.x64') 'Visual C++ x64'
-            Install-FirstAvailable @('Microsoft.VCRedist.2015+.x86') 'Visual C++ x86'
+        'runtimes' {
+            # Every VC++ generation, because a 2011 game links against 2010 and
+            # nothing newer satisfies it. x86 matters as much as x64: plenty of
+            # shipped games are still 32 bit.
+            foreach ($year in @('2005', '2008', '2010', '2012', '2013', '2015+')) {
+                Install-FirstAvailable @("Microsoft.VCRedist.$year.x64") "Visual C++ $year x64"
+                Install-FirstAvailable @("Microsoft.VCRedist.$year.x86") "Visual C++ $year x86"
+            }
+
+            # d3dx9/10/11, XAudio2, XInput 1.3, D3DCompiler_43. DirectX 11 and 12
+            # themselves ship with Windows; this is the legacy helper layer only.
+            Install-FirstAvailable @('Microsoft.DirectX') 'DirectX End-User Runtime'
+
+            Install-FirstAvailable @('Microsoft.DotNet.DesktopRuntime.8') '.NET Desktop Runtime 8'
+            Install-FirstAvailable @('Microsoft.XNARedist') 'XNA Framework Redistributable'
+            Install-FirstAvailable @('CreativeTechnology.OpenAL') 'OpenAL'
+
+            Write-Host '>> .NET Framework 3.5 (old launchers and tools)...' -ForegroundColor Cyan
+            $netfx = Get-WindowsOptionalFeature -Online -FeatureName NetFx3 -ErrorAction SilentlyContinue
+            if ($netfx -and $netfx.State -ne 'Enabled') {
+                try {
+                    Enable-WindowsOptionalFeature -Online -FeatureName NetFx3 -All -NoRestart -ErrorAction Stop | Out-Null
+                    Write-Host '   enabled.'
+                } catch {
+                    Write-Warning "   could not enable NetFx3 ($($_.Exception.Message)). It downloads from Windows Update; check the connection."
+                }
+            } else {
+                Write-Host '   already enabled.'
+            }
         }
-        'directx'  { Install-FirstAvailable @('Microsoft.DirectX') 'DirectX End-User Runtime' }
-        'steam'    { Install-FirstAvailable @('Valve.Steam') 'Steam' }
-        'playnite' { Install-FirstAvailable @('Playnite.Playnite') 'Playnite' }
+
+        'tools' {
+            Install-FirstAvailable @('Git.Git') 'Git'
+            Install-FirstAvailable @('7zip.7zip') '7-Zip'
+        }
+
+        'media' {
+            # Players that bundle their own decoders, so HEVC and AV1 play even
+            # though Windows ships neither and LTSC has no Store to get them from.
+            Install-FirstAvailable @('VideoLAN.VLC') 'VLC'
+            Install-FirstAvailable @('shinchiro.mpv') 'mpv'
+
+            $hevc = Get-AppxPackage -AllUsers -Name 'Microsoft.HEVCVideoExtension*' -ErrorAction SilentlyContinue
+            if (-not $hevc) {
+                Write-Host '   note: no system HEVC decoder (normal on LTSC). VLC and mpv do not need it;' -ForegroundColor DarkGray
+                Write-Host '   only the built-in Media Player and Edge would.' -ForegroundColor DarkGray
+            }
+        }
+
+        'frontends' {
+            $args = @{}
+            if ($Preset -eq 'all') { $args['Install'] = 'all'; $args['BootInto'] = 'steam' }
+            elseif ($Preset -eq 'minimal') { $args['Install'] = 'steam'; $args['BootInto'] = 'steam' }
+            if ($ForUser) { $args['ForUser'] = $ForUser }
+            & (Join-Path $PSScriptRoot 'install-frontend.ps1') @args
+        }
+
+        'torrent' {
+            $args = @{}
+            if ($ForUser) { $args['ForUser'] = $ForUser }
+            & (Join-Path $PSScriptRoot 'install-torrent.ps1') @args
+        }
+
         'gpu' {
             switch ($gpuVendor) {
                 'NVIDIA' { Install-FirstAvailable @('Nvidia.App', 'Nvidia.GeForceExperience') 'NVIDIA App' }
@@ -165,6 +238,7 @@ foreach ($key in $selected) {
                 default  { Write-Warning 'No supported GPU detected, skipping driver step.' }
             }
         }
+
         'defender' {
             # runs last on purpose: exclusions need the game folders to exist
             $tuner = Join-Path $PSScriptRoot 'tune-defender.ps1'
@@ -179,27 +253,47 @@ foreach ($key in $selected) {
                 if ($d -match '^[dD]') { & $tuner -Disable } else { & $tuner }
             }
         }
+
         'updates' {
-            Write-Host '>> Windows updates (PSWindowsUpdate)...' -ForegroundColor Cyan
+            $scope = $UpdateScope
+            if (-not $scope) {
+                if ($Preset) {
+                    $scope = 'all'
+                } else {
+                    Write-Host ''
+                    Write-Host 'Windows updates: [A] everything or [S] security and critical only?'
+                    Write-Host '  On IoT LTSC "everything" is usually right: this edition only ships'
+                    Write-Host '  quality and security fixes, never feature updates.'
+                    $u = Read-Host 'A/S (Enter for A)'
+                    $scope = if ($u -match '^[sS]') { 'security' } else { 'all' }
+                }
+            }
+
+            Write-Host ">> Windows updates ($scope)..." -ForegroundColor Cyan
             if (-not (Get-Module -ListAvailable PSWindowsUpdate)) {
                 Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null
                 Install-Module PSWindowsUpdate -Force -Scope AllUsers
             }
             Import-Module PSWindowsUpdate
             try { Add-WUServiceManager -MicrosoftUpdate -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch { }
-            Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -Install -IgnoreReboot
+
+            if ($scope -eq 'security') {
+                Get-WindowsUpdate -MicrosoftUpdate -Category @('Security Updates', 'Critical Updates') -AcceptAll -Install -IgnoreReboot
+            } else {
+                Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -Install -IgnoreReboot
+            }
             Write-Host 'Updates done (a reboot may be pending).'
         }
     }
 }
 
 Write-Host ''
-if ($selected -contains 'steam') {
+if ($selected -contains 'frontends') {
     Write-Host 'IMPORTANT before replacing the shell:' -ForegroundColor Yellow
     Write-Host '  Open Steam once and log in with "Remember me" ticked, then confirm Big'
     Write-Host '  Picture opens. Without a saved login, the first boot lands on the desktop'
     Write-Host '  login window with no Explorer behind it, which a controller cannot fill in.'
-    Write-Host '  preflight.ps1 checks this for you.'
+    Write-Host '  Shortcut: .\install-steam.ps1 -LaunchForLogin'
     Write-Host ''
 }
 Write-Host 'Bootstrap finished. Suggested order from here:'

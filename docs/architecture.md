@@ -70,6 +70,28 @@ blocking issue unless `-SkipPreflight` is passed.
 
 `dockur/windows` (Windows inside QEMU/KVM inside a Linux container) may become useful later for CI on Linux runners, but locally Hyper-V is native, faster and checkpoint-friendly.
 
+## Performance tuning: what we do and what we refuse to do
+
+`setup/tune-performance.ps1` only implements settings with a documented
+mechanism: hardware-accelerated GPU scheduling, the MMCSS `Games` profile
+(`SystemResponsiveness`, GPU priority, scheduling category), Game Mode, reserved
+storage off, and a pagefile sanity check. `-Aggressive` additionally disables
+Search indexing, SysMain and DiagTrack, and turns memory compression off *only*
+at 32 GB or more, because at 16 GB that trade goes the wrong way.
+
+Popular tweaks it deliberately refuses, because they hurt or measure as noise:
+`bcdedit useplatformclock` and `disabledynamictick` (breaks the modern timer and
+power management, and is a common cause of the stutter it promises to fix),
+disabling the pagefile (crashes engines that commit large address spaces),
+forcing timer resolution, Nagle/TcpAckFrequency edits, blanket debloat scripts
+that break Windows Update, and disabling SSD "defrag" scheduling, which is
+actually the TRIM job.
+
+The honest framing: firmware settings (Resizable BAR, XMP/EXPO, the GPU in the
+CPU-attached x16 slot) outweigh every registry tweak on this list combined, and
+the biggest software win by far is the Defender and startup work, not scheduler
+constants.
+
 ## Non-goals
 
 - Firmware/OEM boot logo replacement (BIOS territory).
