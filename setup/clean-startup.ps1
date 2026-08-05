@@ -171,10 +171,35 @@ New-Item -ItemType Directory -Force -Path (Split-Path $backupPath) | Out-Null
 $stashDir = Join-Path (Split-Path $backupPath) 'startup-files'
 New-Item -ItemType Directory -Force -Path $stashDir | Out-Null
 
-# merge with any previous backup so a second run does not lose the first
-$existing = @()
-if (Test-Path $backupPath) { $existing = @(Get-Content $backupPath -Raw | ConvertFrom-Json) }
-$merged = @($existing) + @($toRemove) | Group-Object Type, Location, Name | ForEach-Object { $_.Group[0] }
+# Merge with any previous backup so a second run does not lose the first.
+# Deduplicated by hand rather than with Group-Object: in Windows PowerShell 5.1
+# the shape "@(array) + @(List[object]) | Group-Object a,b,c" throws "Argument
+# types do not match", while either collection alone groups fine.
+# No @() around ConvertFrom-Json: in Windows PowerShell 5.1 it emits a JSON
+# array as ONE object, so wrapping it produces a nested array, the dedup key
+# becomes the joined values of every entry at once, and a second run duplicates
+# everything it was supposed to merge. foreach handles an array, a single
+# object and $null correctly on its own.
+$existing = $null
+if (Test-Path $backupPath) {
+    try { $existing = Get-Content $backupPath -Raw | ConvertFrom-Json } catch { $existing = $null }
+}
+
+$merged = New-Object System.Collections.Generic.List[object]
+$seen = @{}
+foreach ($item in $existing) {
+    if (-not $item) { continue }
+    $key = "$($item.Type)|$($item.Location)|$($item.Name)"
+    if ($seen.ContainsKey($key)) { continue }
+    $seen[$key] = $true
+    $merged.Add($item)
+}
+foreach ($item in $toRemove) {
+    $key = "$($item.Type)|$($item.Location)|$($item.Name)"
+    if ($seen.ContainsKey($key)) { continue }
+    $seen[$key] = $true
+    $merged.Add($item)
+}
 $merged | ConvertTo-Json -Depth 4 | Set-Content $backupPath -Encoding UTF8
 Write-Host ''
 Write-Host "Backup written to $backupPath"
