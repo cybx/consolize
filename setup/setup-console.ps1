@@ -231,15 +231,8 @@ if ($Unattended) {
 
     $a | ConvertTo-Json -Depth 5 | Set-Content $answersPath -Encoding UTF8
 
-    # the password never goes to disk: create the account now, while we have it
-    if (-not $userExists) {
-        $params = @{ Name = $UserName; FullName = 'Console'; Description = 'consolize console account' }
-        if ($userPassword -and $userPassword.Length -gt 0) { $params['Password'] = $userPassword }
-        else { $params['NoPassword'] = $true; $params['PasswordNeverExpires'] = $true }
-        New-LocalUser @params | Out-Null
-        Add-LocalGroupMember -Group 'Users' -Member $UserName -ErrorAction SilentlyContinue
-        Write-Host "Console account '$UserName' created."
-    }
+    # kept in memory only; the password must never reach answers.json
+    $script:newUserPassword = $userPassword
 }
 
 $UserName = $a.UserName
@@ -248,6 +241,32 @@ $UserName = $a.UserName
 
 $transcript = Join-Path $logDir 'setup.log'
 try { Start-Transcript -Path $transcript -Append | Out-Null } catch { }
+
+# --- console account ---------------------------------------------------------
+# Created here rather than during the interview, so a resumed run (-Unattended,
+# which never sees the interview) still ends up with the account.
+if (-not (Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue)) {
+    Step "Creating the console account '$UserName'"
+
+    $password = $script:newUserPassword
+    if (-not $password -and -not $Unattended) {
+        $password = Read-Host "  password for $UserName (Enter for none)" -AsSecureString
+    }
+
+    # -NoPassword and -PasswordNeverExpires live in different parameter sets,
+    # so they cannot be splatted together.
+    if ($password -and $password.Length -gt 0) {
+        New-LocalUser -Name $UserName -Password $password -FullName 'Console' `
+            -Description 'consolize console account' -PasswordNeverExpires | Out-Null
+    } else {
+        New-LocalUser -Name $UserName -NoPassword -FullName 'Console' `
+            -Description 'consolize console account' | Out-Null
+        Write-Host '  created with no password (fine for a console that logs itself in)'
+    }
+
+    Add-LocalGroupMember -Group 'Users' -Member $UserName -ErrorAction SilentlyContinue
+    Write-Host "  '$UserName' created."
+}
 
 $otherAdmins = Get-LocalGroupMember -Group 'Administrators' -ErrorAction SilentlyContinue |
     Where-Object { $_.ObjectClass -eq 'User' -and $_.Name -notlike "*\$UserName" }
