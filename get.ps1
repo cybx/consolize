@@ -4,8 +4,7 @@ consolize one-line installer.
     irm https://raw.githubusercontent.com/cybx/consolize/main/get.ps1 | iex
 
 Downloads consolize.exe (latest release) plus the setup scripts, installs them
-to C:\Program Files\Consolize and C:\ProgramData\consolize\setup, and offers to
-run the provisioning menu right away.
+to C:\Program Files\Consolize, and offers to run the provisioning right away.
 
 Options, when piping is not enough:
 
@@ -16,7 +15,10 @@ param(
     [string]$Repo = 'cybx/consolize',
     [string]$Ref = 'main',
     [string]$InstallDir = 'C:\Program Files\Consolize',
-    [string]$ScriptDir = 'C:\ProgramData\consolize\setup',
+    # Program Files, not ProgramData: ProgramData grants BUILTIN\Users Write on
+    # everything it contains, and a SYSTEM scheduled task runs these scripts at
+    # every logon. A writable script path there is a handout of SYSTEM.
+    [string]$ScriptDir = 'C:\Program Files\Consolize\setup',
     [switch]$DownloadOnly,
     # Refresh the installed scripts and binary, then stop. The scripts are a
     # copy taken at install time, so a fix published later does not reach a
@@ -119,6 +121,14 @@ New-Item -ItemType Directory -Force -Path $ScriptDir | Out-Null
 Copy-Item (Join-Path $extracted.FullName 'setup\*.ps1') $ScriptDir -Force
 Write-Host "Setup scripts installed to $ScriptDir"
 
+# Earlier versions installed to ProgramData, which any user can write to. Clear
+# those copies out so nobody runs the stale, unsafe ones by habit.
+$legacyScriptDir = 'C:\ProgramData\consolize\setup'
+if ((Test-Path $legacyScriptDir) -and ($legacyScriptDir -ne $ScriptDir)) {
+    Remove-Item (Join-Path $legacyScriptDir '*.ps1') -Force -ErrorAction SilentlyContinue
+    Write-Host "Removed the old copies from $legacyScriptDir (that location is user writable)"
+}
+
 # The boot splash: Windows' own logo is switched off, so this is what the
 # machine shows on the way up.
 $splashSource = Join-Path $extracted.FullName 'assets\splash.png'
@@ -153,6 +163,9 @@ if ($UpdateOnly) {
     Write-Host 'Nothing else run. To continue a setup you already answered:'
     Write-Host "    cd '$ScriptDir'"
     Write-Host '    .\setup-console.ps1 -Unattended'
+    Write-Host ''
+    Write-Host 'Note the path: it moved out of ProgramData, which grants every user' -ForegroundColor DarkGray
+    Write-Host 'write access, and a SYSTEM task runs these scripts at logon.' -ForegroundColor DarkGray
     return
 }
 

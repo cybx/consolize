@@ -358,11 +358,13 @@ if ($a.Autologon) {
 Step 'Scheduling the rest'
 Remove-ConsolizeTasks
 
-# The console account has to write the "ready" marker, and ProgramData does not
-# grant that by inheritance. Grant ONLY the shared subfolder, never the tree:
-# the setup scripts live under this same directory and the finish task runs them
-# as SYSTEM at every logon, so a writable script path would hand SYSTEM to
-# anything running as the console account (a modded game, an exploited frontend).
+# ProgramData hands BUILTIN\Users Write on everything below it, and answers.json
+# here is read by a SYSTEM task that acts on what it says. Drop inheritance and
+# put it back as read-only for ordinary users.
+icacls $stateDir /inheritance:r /grant 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' 'Users:(OI)(CI)RX' | Out-Null
+
+# The console account still has to write the "ready" marker, so grant exactly
+# one subfolder and nothing else.
 New-Item -ItemType Directory -Force -Path $sharedDir | Out-Null
 icacls $sharedDir /grant "${UserName}:(OI)(CI)M" | Out-Null
 Write-Host "  $UserName can write to $sharedDir (and nothing else here)"
@@ -374,7 +376,17 @@ $scriptAcl = (Get-Acl $here).Access | Where-Object {
     $_.IdentityReference -notmatch 'SYSTEM|Administrators|TrustedInstaller|CREATOR OWNER'
 }
 if ($scriptAcl) {
-    throw "$here is writable by $($scriptAcl.IdentityReference -join ', '). Refusing to run a SYSTEM task from there."
+    throw @"
+$here is writable by $($scriptAcl.IdentityReference -join ', '), and the finish
+task would run it as SYSTEM at every logon. Refusing.
+
+This is what an install under C:\ProgramData looks like: that tree grants
+BUILTIN\Users Write. Reinstall to the safe location and resume:
+
+  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/cybx/consolize/main/get.ps1))) -UpdateOnly
+  cd 'C:\Program Files\Consolize\setup'
+  .\setup-console.ps1 -Unattended
+"@
 }
 
 # Both tasks need the same battery policy. Without it a task inherits

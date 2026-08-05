@@ -56,7 +56,7 @@ in the guest. No SDK, git or internet needed inside the VM.
 ## 3. Provision (guest, admin PowerShell)
 
 ```powershell
-cd C:\ProgramData\consolize\setup    # or C:\consolize if you used Copy-ToVm
+cd 'C:\Program Files\Consolize\setup'   # or C:\consolize if you used Copy-ToVm
 .\bootstrap-gaming.ps1               # winget bootstrap, runtimes, Steam, Defender choice
 .\quiet-machine.ps1
 .\set-autologon.ps1 -UserName gamer
