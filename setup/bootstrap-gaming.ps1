@@ -124,7 +124,10 @@ elseif ($gpus -match 'AMD|Radeon') { $gpuVendor = 'AMD' }
 elseif ($gpus -match 'Intel') { $gpuVendor = 'Intel' }
 $gpuLabel = if ($gpuVendor) { $gpuVendor } else { 'none detected' }
 
-$items = [ordered]@{
+# NOT named $items: PowerShell variable names are case insensitive, so a local
+# $items would BE the [string[]]$Items parameter, and assigning a dictionary to
+# it silently coerces the whole thing into a one element string array.
+$catalog = [ordered]@{
     updates   = @{ Label = 'Windows updates (asks: everything or security only)'; Recommended = $true }
     gpu       = @{ Label = "GPU driver app (detected: $gpuLabel)";                 Recommended = [bool]$gpuVendor }
     runtimes  = @{ Label = 'Game runtimes (VC++ 2005-2022, DirectX, .NET, XNA, OpenAL)'; Recommended = $true }
@@ -134,12 +137,12 @@ $items = [ordered]@{
     torrent   = @{ Label = 'qBittorrent plus a torrent folder layout';             Recommended = $false }
     defender  = @{ Label = 'Defender: tune (default) or disable entirely';         Recommended = $true }
 }
-$recommendedKeys = @($items.Keys | Where-Object { $items[$_].Recommended })
+$recommendedKeys = @($catalog.Keys | Where-Object { $catalog[$_].Recommended })
 
 $selected = $null
-if ($Items) { $selected = @($Items | Where-Object { $items.Contains($_) }) }
+if ($Items) { $selected = @($Items | Where-Object { $catalog.Contains($_) }) }
 switch ($Preset) {
-    'all'         { $selected = @($items.Keys) }
+    'all'         { $selected = @($catalog.Keys) }
     'minimal'     { $selected = @('runtimes', 'frontends', 'defender') }
     'recommended' { $selected = $recommendedKeys }
 }
@@ -150,14 +153,14 @@ if (-not $selected) {
     Write-Host "GPU(s) found: $gpus"
     Write-Host ''
     Write-Host 'What should be installed? [Enter/R] = recommended (*), "all", or a comma list of keys:'
-    foreach ($k in $items.Keys) {
-        $mark = if ($items[$k].Recommended) { '*' } else { ' ' }
-        Write-Host ("  [{0,-9}] {1} {2}" -f $k, $mark, $items[$k].Label)
+    foreach ($k in $catalog.Keys) {
+        $mark = if ($catalog[$k].Recommended) { '*' } else { ' ' }
+        Write-Host ("  [{0,-9}] {1} {2}" -f $k, $mark, $catalog[$k].Label)
     }
     $answer = Read-Host 'Choice'
     if ([string]::IsNullOrWhiteSpace($answer) -or $answer -match '^[rR]$') { $selected = $recommendedKeys }
-    elseif ($answer -match '^(all|a)$') { $selected = @($items.Keys) }
-    else { $selected = @($answer -split '[,\s]+' | Where-Object { $items.Contains($_) }) }
+    elseif ($answer -match '^(all|a)$') { $selected = @($catalog.Keys) }
+    else { $selected = @($answer -split '[,\s]+' | Where-Object { $catalog.Contains($_) }) }
 }
 
 if (-not $selected -or $selected.Count -eq 0) { Write-Host 'Nothing selected, bye.'; return }

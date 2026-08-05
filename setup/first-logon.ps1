@@ -8,7 +8,7 @@ It does the two things that only exist inside this account:
     do it on this account's behalf
 
 A marker file in %LOCALAPPDATA% keeps it from running again. The scheduled task
-itself is removed by setup-console.ps1 -EnableShell, which needs admin.
+itself is removed by the SYSTEM finish task once the shell is replaced.
 #>
 $ErrorActionPreference = 'Continue'
 
@@ -161,7 +161,7 @@ if ($steamReady) {
         Start-Sleep -Seconds 20
     } catch {
         Write-Warning "Could not signal readiness ($($_.Exception.Message))."
-        Write-Warning 'On the admin account run: .\setup-console.ps1 -Finish'
+        Write-Warning 'From an administrator session run: setup-console.ps1 -Finish'
         Read-Host 'Press Enter to close'
     }
 } else {

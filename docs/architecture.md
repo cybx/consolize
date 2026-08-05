@@ -114,6 +114,32 @@ dependency, and it covers exactly the seconds that would otherwise be black.
 
 [HackBGRT]: https://github.com/Metabolix/HackBGRT
 
+## Static checks
+
+`scripts/check-scripts.ps1` catches the failure modes that only surface at run
+time, which in a provisioning tool means they surface on the user's machine,
+halfway through:
+
+- **Parameter / local variable collisions.** PowerShell variable names are case
+  insensitive, so a local `$items` *is* the `[string[]]$Items` parameter, and the
+  type constraint silently coerces an `OrderedDictionary` into a one element
+  `String[]`. This broke `bootstrap-gaming.ps1` mid-run with an error pointing at
+  a line that looked perfectly fine.
+- **A bare `+` inside a command call**, which PowerShell parses as extra
+  positional arguments rather than concatenation. This broke `preflight.ps1`
+  exactly when autologon was unconfigured, the normal case on a fresh machine.
+- **Calls between scripts passing parameters the target does not declare**, which
+  is how a renamed or removed parameter turns into a stale instruction.
+- Parse errors and functions used before definition.
+
+It walks the AST rather than the text, so `Write-Host '.\foo.ps1 -Restore'
+-ForegroundColor Red` is correctly read as a `Write-Host` call and not as
+`foo.ps1` receiving a `-ForegroundColor` parameter.
+
+```powershell
+pwsh -File scripts/check-scripts.ps1
+```
+
 ## Non-goals
 
 - Firmware/OEM boot logo replacement (BIOS territory).
