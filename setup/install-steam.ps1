@@ -91,7 +91,10 @@ if ($steam) {
 
     if (Get-Command winget -ErrorAction SilentlyContinue) {
         Write-Host '  trying winget (Valve.Steam)...'
-        winget install --id Valve.Steam -e --silent --accept-package-agreements --accept-source-agreements
+        # pinned to the community source: msstore would prompt for the region
+        & winget list --source winget --accept-source-agreements *>$null
+        winget install --id Valve.Steam --source winget -e --silent `
+            --accept-package-agreements --accept-source-agreements
         Start-Sleep -Seconds 3
         if (Get-SteamPath) { $installed = $true; Write-Host '  installed via winget.' }
         else { Write-Warning "  winget did not produce a working install (exit $LASTEXITCODE)." }

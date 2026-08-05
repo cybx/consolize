@@ -107,11 +107,26 @@ function Ensure-Winget {
     Write-Host 'winget ready.'
 }
 
+# Every package this project installs comes from the community winget repo, so
+# pin the source: the msstore source has an extra agreement (it sends the
+# machine's 2 letter region) that --accept-source-agreements does not always
+# cover, and the prompt stops an otherwise automatic install dead.
+function Initialize-Winget {
+    if ($script:WingetReady) { return }
+    & winget list --source winget --accept-source-agreements *>$null
+    $help = (& winget install --help 2>&1) -join ' '
+    $script:WingetInteractiveFlag = if ($help -match 'disable-interactivity') { @('--disable-interactivity') } else { @() }
+    $script:WingetReady = $true
+}
+
 function Install-FirstAvailable {
     param([string[]]$Ids, [string]$Label)
+    Initialize-Winget
     Write-Host ">> $Label..." -ForegroundColor Cyan
+    $common = @('--source', 'winget', '-e', '--silent',
+                '--accept-package-agreements', '--accept-source-agreements') + $script:WingetInteractiveFlag
     foreach ($id in $Ids) {
-        winget install --id $id -e --silent --accept-package-agreements --accept-source-agreements
+        winget install --id $id @common
         if ($LASTEXITCODE -eq 0) { return }
         Write-Warning "$Label ($id): winget exited with $LASTEXITCODE, trying next candidate (or it is already installed)."
     }

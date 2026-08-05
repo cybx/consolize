@@ -57,7 +57,9 @@ if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
 
 Write-Host ''
 Write-Host '>> qBittorrent...' -ForegroundColor Cyan
-winget install --id qBittorrent.qBittorrent -e --silent --accept-package-agreements --accept-source-agreements
+& winget list --source winget --accept-source-agreements *>$null
+winget install --id qBittorrent.qBittorrent --source winget -e --silent `
+    --accept-package-agreements --accept-source-agreements
 if ($LASTEXITCODE -ne 0) { Write-Warning "winget exited with $LASTEXITCODE (qBittorrent may already be installed)." }
 
 # --- point qBittorrent at the folders, without clobbering an existing setup ---

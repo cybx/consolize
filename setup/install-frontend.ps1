@@ -63,7 +63,12 @@ function Install-Frontend {
         Write-Warning "winget not available, skipping $($item.Label). Run bootstrap-gaming.ps1 first, it bootstraps winget."
         return
     }
-    winget install --id $item.WingetId -e --silent --accept-package-agreements --accept-source-agreements
+    # --source winget on purpose: the msstore source has an extra agreement that
+    # prompts for the machine's geographic region, and that prompt would stop an
+    # otherwise unattended install.
+    & winget list --source winget --accept-source-agreements *>$null
+    winget install --id $item.WingetId --source winget -e --silent `
+        --accept-package-agreements --accept-source-agreements
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "$($item.Label): winget exited with $LASTEXITCODE (it may already be installed)."
     }
