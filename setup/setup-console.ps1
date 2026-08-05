@@ -126,6 +126,11 @@ if ($Finish) {
     try {
         & (Join-Path $here 'enable-shell-launcher.ps1') -UserName $user -SkipPreflight *>&1 |
             ForEach-Object { Write-FinishLog "  $_" }
+
+        # Only now: everything before this point can fail, and a hidden logon
+        # screen would turn any such failure into a black screen with no way in.
+        & (Join-Path $here 'boot-silent.ps1') -IncludeLogon *>&1 |
+            ForEach-Object { Write-FinishLog "  $_" }
     } catch {
         Write-FinishLog "FAILED to replace the shell: $($_.Exception.Message)"
         Write-FinishLog 'the machine still boots to the desktop; tasks left in place to retry'
@@ -327,7 +332,9 @@ if ($a.Torrent) { $selection += 'torrent' }
 Step 'Quiet layer'
 & (Join-Path $here 'quiet-machine.ps1')
 
-Step 'Silent boot (no logo, no welcome screen)'
+Step 'Silent boot (no logo)'
+# Without -IncludeLogon on purpose: the logon screen stays visible until the
+# console is actually working, so a failure here never hides the way back in.
 & (Join-Path $here 'boot-silent.ps1')
 
 Step 'Defender'

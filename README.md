@@ -105,6 +105,18 @@ If the Steam sign-in never happens, step 3 refuses to replace the shell and says
 why: booting into a login window a controller cannot fill in would strand you.
 Cancel a setup in progress with `.\setup-console.ps1 -Abort`.
 
+**If you end up looking at a black screen**, `Ctrl+Shift+Esc` opens Task Manager
+over any shell. File > Run new task, tick "Create this task with administrative
+privileges", and run:
+
+```
+powershell -ExecutionPolicy Bypass -File "C:\Program Files\Consolize\setup\rescue.ps1"
+```
+
+That gives back the logon screen, the desktop and the boot messages in one go,
+and cancels anything still scheduled. The logon screen is only hidden at the very
+end of a successful setup, precisely so a failure never hides the way back in.
+
 Everything below is the manual/from-source path; each script also works alone.
 
 ## Quick start (bench testing, no shell replacement)

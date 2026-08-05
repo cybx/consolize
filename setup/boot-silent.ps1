@@ -22,7 +22,15 @@ What still shows and cannot be scripted away:
   .\boot-silent.ps1
   .\boot-silent.ps1 -Restore
 #>
-param([switch]$Restore)
+param(
+    [switch]$Restore,
+    # Hiding the logon UI is only safe once the machine actually logs itself in
+    # and boots into a frontend. Applied earlier, any failure anywhere in
+    # provisioning leaves a black screen with no visible way to sign in. So the
+    # logon half is opt-in and the finish task turns it on last, after the shell
+    # is in place.
+    [switch]$IncludeLogon
+)
 $ErrorActionPreference = 'Stop'
 
 $logonUI = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI'
@@ -111,6 +119,17 @@ if ($entries -le 1) {
 }
 
 # --- logon: no welcome screen, no status text --------------------------------
+if (-not $IncludeLogon) {
+    Write-Host ''
+    Write-Host 'Logon screen left visible for now.' -ForegroundColor DarkGray
+    Write-Host 'It is hidden at the very end, once the console actually logs itself in:' -ForegroundColor DarkGray
+    Write-Host 'hiding it before that turns any setup failure into a black screen with no' -ForegroundColor DarkGray
+    Write-Host 'visible way to sign in.' -ForegroundColor DarkGray
+    Write-Host ''
+    Write-Host 'Done. Reboot to see it.' -ForegroundColor Green
+    return
+}
+
 Write-Host ''
 Write-Host 'Logon: welcome screen and status messages off...'
 Set-RegValue $logonUI 'AnimationDisabled' 1
