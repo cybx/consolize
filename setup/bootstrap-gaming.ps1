@@ -15,9 +15,9 @@ Items:
   directx   DirectX End-User Runtime (legacy d3dx9/xaudio for older titles)
   steam     Steam
   playnite  Playnite (only if you plan the Playnite frontend)
-  defender  Stop Defender from costing frames: exclude game libraries and
-            shader caches, scans only when idle, no scheduled scan
-            (see tune-defender.ps1 for turning it off entirely)
+  defender  Defender: tune it (exclusions + idle-only scans) or disable it
+            entirely, asked at run time. -Preset all disables it; any other
+            preset only tunes. See tune-defender.ps1.
 
 Written for Windows PowerShell 5.1 (a fresh install has no pwsh 7).
 winget is bootstrapped automatically when missing (IoT LTSC ships without
@@ -111,7 +111,7 @@ $items = [ordered]@{
     directx  = @{ Label = 'DirectX End-User Runtime (older titles)';     Recommended = $true }
     steam    = @{ Label = 'Steam';                                       Recommended = $true }
     playnite = @{ Label = 'Playnite';                                    Recommended = $false }
-    defender = @{ Label = 'Defender tuning (exclusions + idle-only scans)'; Recommended = $true }
+    defender = @{ Label = 'Defender: tune (default) or disable entirely, asked below'; Recommended = $true }
 }
 $recommendedKeys = @($items.Keys | Where-Object { $items[$_].Recommended })
 
@@ -167,7 +167,17 @@ foreach ($key in $selected) {
         }
         'defender' {
             # runs last on purpose: exclusions need the game folders to exist
-            & (Join-Path $PSScriptRoot 'tune-defender.ps1')
+            $tuner = Join-Path $PSScriptRoot 'tune-defender.ps1'
+            if ($Preset -eq 'all') {
+                & $tuner -Disable
+            } elseif ($Preset) {
+                & $tuner
+            } else {
+                Write-Host ''
+                Write-Host 'Defender: [T] tune it (keeps you protected, recommended) or [D] disable it entirely?'
+                $d = Read-Host 'T/D'
+                if ($d -match '^[dD]') { & $tuner -Disable } else { & $tuner }
+            }
         }
         'updates' {
             Write-Host '>> Windows updates (PSWindowsUpdate)...' -ForegroundColor Cyan

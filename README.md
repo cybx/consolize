@@ -59,6 +59,7 @@ Config lives at `%LOCALAPPDATA%\Consolize\config.json` (created on first run), l
 # as admin, from the repo root, on the machine that will become the console
 ./setup/bootstrap-gaming.ps1              # drivers (GPU autodetect), VC++ runtimes, DirectX, Steam, updates, Defender tuning; interactive with recommended defaults (installs winget itself if missing)
 ./setup/quiet-machine.ps1                 # nothing ever pops over a game, updates at 04:00, quiet boot
+./setup/tune-defender.ps1                 # game folders excluded, idle-only scans (add -Disable to turn Defender off entirely)
 ./setup/set-autologon.ps1 -UserName gamer # autologon with the password stored as an LSA secret (never plaintext)
 ./setup/install.ps1                       # builds and installs consolize.exe
 ./setup/enable-shell-launcher.ps1 -UserName gamer
