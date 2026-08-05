@@ -77,8 +77,42 @@ internal static class Program
     private static volatile SessionMode _mode = SessionMode.Console;
     private static volatile bool _resumeConsoleRequested;
 
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AttachConsole(uint processId);
+
+    private const uint AttachParentProcess = 0xFFFFFFFF;
+
+    /// <summary>
+    /// This is a WinExe, so it has no console and Console.Out is a sink: every
+    /// diagnostic printed nothing, which matters most when the desktop is gone
+    /// and a terminal is all there is. Borrow the caller's console for the
+    /// command line paths.
+    /// </summary>
+    private static void AttachToCallerConsole()
+    {
+        try
+        {
+            // When the caller already captures our output (a pipe, a file, `&`
+            // in PowerShell), the standard handles are valid and writing works
+            // as it is: attaching and reopening would only get in the way.
+            if (Console.IsOutputRedirected) return;
+
+            if (!AttachConsole(AttachParentProcess)) return;
+            var stdout = new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true };
+            Console.SetOut(stdout);
+            var stderr = new StreamWriter(Console.OpenStandardError()) { AutoFlush = true };
+            Console.SetError(stderr);
+        }
+        catch
+        {
+            // no console to attach to (launched from Explorer or as the shell)
+        }
+    }
+
     private static int Main(string[] args)
     {
+        if (args.Length >= 1) AttachToCallerConsole();
+
         if (args.Length >= 2 && args[0].Equals("send", StringComparison.OrdinalIgnoreCase))
             return SendCommand(args[1]);
 
@@ -105,7 +139,20 @@ internal static class Program
         }
         catch (Exception ex)
         {
+            // Returning here would end the process that IS the shell, and Shell
+            // Launcher would restart it into the same failure. Give the user a
+            // desktop instead and stay alive.
             Log($"FATAL: {ex}");
+            try
+            {
+                EnterDesktop();
+                Log("fell back to the desktop; the session manager stays up so you have a way in");
+                Cts.Token.WaitHandle.WaitOne();
+            }
+            catch (Exception inner)
+            {
+                Log($"could not even fall back to the desktop: {inner.Message}");
+            }
             return 1;
         }
     }
@@ -233,77 +280,150 @@ internal static class Program
 
         while (!ct.IsCancellationRequested)
         {
-            var frontend = ResolveFrontend();
-            if (frontend is null)
-            {
-                Log("no frontend found (is Steam/Playnite installed?), falling back to desktop");
-                EnterDesktop();
-                IdleUntilConsoleRequested(ct, TimeSpan.FromSeconds(30));
-                continue;
-            }
-
-            var (exe, arguments) = frontend.Value;
-            Process proc;
+            // This process IS the shell. An escaping exception ends it, and
+            // Shell Launcher restarts it straight back into the same throw:
+            // a black screen in a restart loop. Nothing in here may propagate.
             try
             {
-                proc = Process.Start(new ProcessStartInfo
-                {
-                    FileName = exe,
-                    Arguments = arguments,
-                    WorkingDirectory = Path.GetDirectoryName(exe) ?? Environment.SystemDirectory,
-                    UseShellExecute = false,
-                }) ?? throw new InvalidOperationException("Process.Start returned null");
+                WatchdogIteration(ct, crashes);
             }
             catch (Exception ex)
             {
-                Log($"failed to start frontend '{exe}': {ex.Message}");
-                SleepCancellable(ct, TimeSpan.FromSeconds(_config.RelaunchDelaySeconds));
-                continue;
-            }
-
-            lock (Sync) _frontend = proc;
-            Log($"frontend started: {exe} {arguments} (pid {proc.Id})");
-            ShowSplash(proc);
-
-            try { proc.WaitForExit(); } catch { /* killed externally */ }
-
-            int exitCode;
-            try { exitCode = proc.ExitCode; } catch { exitCode = -1; }
-            lock (Sync) _frontend = null;
-            Log($"frontend exited with code {exitCode}");
-
-            if (ct.IsCancellationRequested) break;
-
-            if (exitCode == 0 && !_config.RelaunchOnCleanExit)
-            {
-                Log("clean exit and RelaunchOnCleanExit=false, entering desktop");
+                Log($"watchdog iteration failed, staying alive: {ex}");
                 EnterDesktop();
-                IdleUntilConsoleRequested(ct, TimeSpan.FromSeconds(5));
-                continue;
+                SleepCancellable(ct, TimeSpan.FromSeconds(30));
             }
+        }
+    }
 
-            if (exitCode != 0)
+    private static void WatchdogIteration(CancellationToken ct, Queue<DateTime> crashes)
+    {
+        var frontend = ResolveFrontend();
+        if (frontend is null)
+        {
+            Log("no frontend found (is Steam/Playnite installed?), falling back to desktop");
+            EnterDesktop();
+            IdleUntilConsoleRequested(ct, TimeSpan.FromSeconds(30));
+            return;
+        }
+
+        var (exe, arguments) = frontend.Value;
+        Process proc;
+        var startedAt = DateTime.UtcNow;
+        try
+        {
+            proc = Process.Start(new ProcessStartInfo
             {
-                var now = DateTime.UtcNow;
-                crashes.Enqueue(now);
-                while (crashes.Count > 0 && (now - crashes.Peek()).TotalSeconds > _config.CrashWindowSeconds)
-                    crashes.Dequeue();
+                FileName = exe,
+                Arguments = arguments,
+                WorkingDirectory = Path.GetDirectoryName(exe) ?? Environment.SystemDirectory,
+                UseShellExecute = false,
+            }) ?? throw new InvalidOperationException("Process.Start returned null");
+        }
+        catch (Exception ex)
+        {
+            Log($"failed to start frontend '{exe}': {ex.Message}");
+            SleepCancellable(ct, TimeSpan.FromSeconds(_config.RelaunchDelaySeconds));
+            return;
+        }
 
-                if (crashes.Count >= _config.MaxCrashesInWindow)
+        lock (Sync) _frontend = proc;
+        Log($"frontend started: {exe} {arguments} (pid {proc.Id})");
+        ShowSplash(proc);
+
+        try { proc.WaitForExit(); } catch { /* killed externally */ }
+
+        int exitCode;
+        try { exitCode = proc.ExitCode; } catch { exitCode = -1; }
+        var ranFor = DateTime.UtcNow - startedAt;
+        lock (Sync) _frontend = null;
+        Log($"frontend exited with code {exitCode} after {ranFor.TotalSeconds:F1}s");
+
+        if (ct.IsCancellationRequested) return;
+
+        // steam.exe -bigpicture hands off to an already running client and
+        // returns 0 within a second or two; Steam also re-execs itself after a
+        // self-update. Relaunching then would loop forever over a perfectly
+        // healthy frontend, so adopt the process that is actually running.
+        if (exitCode == 0 && ranFor < TimeSpan.FromSeconds(15))
+        {
+            var adopted = FindRunningFrontend(exe);
+            if (adopted is not null)
+            {
+                lock (Sync) _frontend = adopted;
+                Log($"frontend handed off to pid {adopted.Id}, watching that instead");
+                try { adopted.WaitForExit(); } catch { /* gone */ }
+                lock (Sync) _frontend = null;
+                Log("adopted frontend exited");
+                if (ct.IsCancellationRequested) return;
+                SleepCancellable(ct, TimeSpan.FromSeconds(_config.RelaunchDelaySeconds));
+                return;
+            }
+        }
+
+        if (exitCode == 0 && ranFor > TimeSpan.FromSeconds(15) && !_config.RelaunchOnCleanExit)
+        {
+            Log("clean exit and RelaunchOnCleanExit=false, entering desktop");
+            EnterDesktop();
+            IdleUntilConsoleRequested(ct, TimeSpan.FromSeconds(5));
+            return;
+        }
+
+        // Count anything that dies almost immediately, whatever it returns:
+        // a frontend that exits 0 in half a second is failing, not finishing,
+        // and only counting non-zero exits meant the breaker could never fire.
+        if (exitCode != 0 || ranFor < TimeSpan.FromSeconds(15))
+        {
+            var now = DateTime.UtcNow;
+            crashes.Enqueue(now);
+            while (crashes.Count > 0 && (now - crashes.Peek()).TotalSeconds > _config.CrashWindowSeconds)
+                crashes.Dequeue();
+
+            if (crashes.Count >= _config.MaxCrashesInWindow)
+            {
+                Log($"frontend failed {crashes.Count}x within {_config.CrashWindowSeconds}s, breaking the loop");
+                crashes.Clear();
+                if (_config.FallbackToDesktopAfterMaxCrashes)
                 {
-                    Log($"frontend crashed {crashes.Count}x within {_config.CrashWindowSeconds}s, breaking the loop");
-                    crashes.Clear();
-                    if (_config.FallbackToDesktopAfterMaxCrashes)
-                    {
-                        EnterDesktop();
-                        IdleUntilConsoleRequested(ct, TimeSpan.FromSeconds(60));
-                        continue;
-                    }
+                    EnterDesktop();
+                    IdleUntilConsoleRequested(ct, TimeSpan.FromSeconds(60));
+                    return;
                 }
             }
-
-            SleepCancellable(ct, TimeSpan.FromSeconds(_config.RelaunchDelaySeconds));
         }
+
+        SleepCancellable(ct, TimeSpan.FromSeconds(_config.RelaunchDelaySeconds));
+    }
+
+    /// <summary>
+    /// After a launcher hands off to an existing instance, finds the process
+    /// actually running the frontend in this session.
+    /// </summary>
+    private static Process? FindRunningFrontend(string exePath)
+    {
+        var name = Path.GetFileNameWithoutExtension(exePath);
+        var session = Process.GetCurrentProcess().SessionId;
+        Process? best = null;
+
+        foreach (var candidate in Process.GetProcessesByName(name))
+        {
+            try
+            {
+                if (candidate.SessionId == session && !candidate.HasExited)
+                {
+                    if (best is null) { best = candidate; continue; }
+                    // keep the oldest: that is the client the launcher joined
+                    if (candidate.StartTime < best.StartTime) { best.Dispose(); best = candidate; continue; }
+                }
+                candidate.Dispose();
+            }
+            catch
+            {
+                try { candidate.Dispose(); } catch { }
+            }
+        }
+
+        return best;
     }
 
     private static (string Exe, string Args)? ResolveFrontend()
@@ -365,26 +485,38 @@ internal static class Program
 
             foreach (var name in root.GetSubKeyNames())
             {
-                using var app = root.OpenSubKey(name);
-                var displayName = app?.GetValue("DisplayName") as string;
-                if (displayName is null || !displayName.Contains(displayNameFragment, StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                if (app!.GetValue("InstallLocation") as string is { Length: > 0 } location)
+                // A single ACL'd subkey would otherwise throw out of the shell
+                // process itself, and Shell Launcher would restart it straight
+                // back into the same exception.
+                try
                 {
-                    var exe = Path.Combine(location, exeName);
-                    if (File.Exists(exe)) return exe;
-                }
+                    using var app = root.OpenSubKey(name);
+                    var displayName = app?.GetValue("DisplayName") as string;
+                    if (displayName is null || !displayName.Contains(displayNameFragment, StringComparison.OrdinalIgnoreCase))
+                        continue;
 
-                if (app.GetValue("DisplayIcon") as string is { Length: > 0 } icon)
-                {
-                    var iconPath = icon.Split(',')[0].Trim('"');
-                    var dir = Path.GetDirectoryName(iconPath);
-                    if (dir is not null)
+                    if (app!.GetValue("InstallLocation") as string is { Length: > 0 } location)
                     {
-                        var exe = Path.Combine(dir, exeName);
+                        var exe = Path.Combine(location, exeName);
                         if (File.Exists(exe)) return exe;
                     }
+
+                    if (app.GetValue("DisplayIcon") as string is { Length: > 0 } icon)
+                    {
+                        var iconPath = icon.Split(',')[0].Trim('"');
+                        var dir = Path.GetDirectoryName(iconPath);
+                        if (dir is not null)
+                        {
+                            var exe = Path.Combine(dir, exeName);
+                            if (File.Exists(exe)) return exe;
+                        }
+                    }
+                }
+                catch (Exception ex) when (ex is System.Security.SecurityException
+                                            or UnauthorizedAccessException
+                                            or IOException)
+                {
+                    continue;
                 }
             }
         }
@@ -418,9 +550,19 @@ internal static class Program
     // thread and never blocks the watchdog: a splash that fails is a log line,
     // not a dead console.
 
+    private static Thread? _splashThread;
+    private static DateTime _lastSplash = DateTime.MinValue;
+
     private static void ShowSplash(Process frontend)
     {
         if (!_config.SplashEnabled) return;
+
+        // One splash at a time, and not again right after the last one: a
+        // frontend that hands off and relaunches would otherwise stack
+        // fullscreen topmost windows over a healthy console.
+        if (_splashThread is { IsAlive: true }) return;
+        if (DateTime.UtcNow - _lastSplash < TimeSpan.FromSeconds(_config.SplashSeconds + 5)) return;
+        _lastSplash = DateTime.UtcNow;
 
         var imagePath = _config.SplashImage;
         if (string.IsNullOrWhiteSpace(imagePath))
@@ -489,6 +631,7 @@ internal static class Program
             Name = "consolize-splash",
         };
         thread.SetApartmentState(ApartmentState.STA);
+        _splashThread = thread;
         thread.Start();
     }
 
@@ -740,6 +883,12 @@ internal static class Program
 
     private static void IdleUntilConsoleRequested(CancellationToken ct, TimeSpan retryAfter)
     {
+        // Clear anything latched while nobody was waiting, otherwise a console
+        // request from an earlier desktop visit makes the crash-loop breaker
+        // return instantly and the machine flaps between a failing frontend and
+        // a half-started Explorer.
+        _resumeConsoleRequested = false;
+
         var waited = TimeSpan.Zero;
         var step = TimeSpan.FromMilliseconds(500);
         while (!ct.IsCancellationRequested && waited < retryAfter)

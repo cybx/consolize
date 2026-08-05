@@ -25,7 +25,11 @@ param(
     [switch]$List,
     [switch]$All,
     [string[]]$Keep,
-    [switch]$Restore
+    [switch]$Restore,
+    # HKCU and the personal Startup folder always resolve to the user RUNNING
+    # this script. During provisioning that is the administrator, not the
+    # console account, so sweeping them would empty the wrong person's startup.
+    [switch]$MachineOnly
 )
 $ErrorActionPreference = 'Stop'
 
@@ -34,10 +38,12 @@ $backupPath = 'C:\ProgramData\consolize\startup-backup.json'
 $runKeys = @(
     'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
     'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run',
-    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce',
-    'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
-    'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce'
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce'
 )
+if (-not $MachineOnly) {
+    $runKeys += 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
+    $runKeys += 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce'
+}
 
 function Get-StartupItems {
     $items = New-Object System.Collections.Generic.List[object]
@@ -53,7 +59,9 @@ function Get-StartupItems {
         }
     }
 
-    foreach ($folder in @([Environment]::GetFolderPath('Startup'), [Environment]::GetFolderPath('CommonStartup'))) {
+    $folders = @([Environment]::GetFolderPath('CommonStartup'))
+    if (-not $MachineOnly) { $folders += [Environment]::GetFolderPath('Startup') }
+    foreach ($folder in $folders) {
         if (-not $folder -or -not (Test-Path $folder)) { continue }
         foreach ($f in Get-ChildItem $folder -File -ErrorAction SilentlyContinue) {
             if ($f.Name -eq 'desktop.ini') { continue }
@@ -119,6 +127,11 @@ if (-not $items -or $items.Count -eq 0) {
 }
 
 Write-Host ''
+if ($MachineOnly) {
+    Write-Host 'Scope: machine-wide entries only (all users).' -ForegroundColor DarkGray
+} else {
+    Write-Host "Scope: machine-wide plus the startup of the account running this ($env:USERNAME)." -ForegroundColor DarkGray
+}
 Write-Host "Starting with Windows right now ($($items.Count) entries):" -ForegroundColor Cyan
 $i = 0
 foreach ($item in $items) {

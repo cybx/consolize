@@ -231,14 +231,19 @@ internal static class Bluetooth
         public uint Numeric_Value_Passkey;
     }
 
-    [StructLayout(LayoutKind.Sequential)]
+    // Native layout: address at 0, authMethod at 8, then a UNION at 12 whose
+    // largest member (BLUETOOTH_OOB_DATA_INFO) is 32 bytes, so negativeResponse
+    // sits at 44 and the struct is 48. Declared sequentially it landed at 48
+    // instead, meaning the refusal flag was written past what the API reads:
+    // a device that wanted a typed passkey got an affirmative answer with
+    // passkey 0 and the call blocked until the pairing timed out.
+    [StructLayout(LayoutKind.Explicit, Size = 48)]
     private struct BLUETOOTH_AUTHENTICATE_RESPONSE
     {
-        public ulong bthAddressRemote;
-        public AUTHENTICATION_METHOD authMethod;
-        public uint numericCompNumericValueOrPasskey;
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)] public byte[] pinInfo;
-        public byte negativeResponse;
+        [FieldOffset(0)] public ulong bthAddressRemote;
+        [FieldOffset(8)] public AUTHENTICATION_METHOD authMethod;
+        [FieldOffset(12)] public uint numericCompNumericValueOrPasskey;
+        [FieldOffset(44)] public byte negativeResponse;
     }
 
     private delegate bool BluetoothAuthenticationCallbackEx(

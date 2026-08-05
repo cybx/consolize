@@ -39,9 +39,15 @@ if (-not $SkipPreflight) {
 
 Write-Host 'Enabling the Shell Launcher optional feature (no restart)...'
 dism /online /enable-feature /featurename:Client-EmbeddedShellLauncher /all /norestart | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    throw 'Could not enable Client-EmbeddedShellLauncher. Is this an Enterprise/Education/IoT Enterprise edition?'
+# 3010 is ERROR_SUCCESS_REBOOT_REQUIRED, the normal companion of /norestart, and
+# provisioning guarantees it: boot-silent.ps1 enables three Device Lockdown
+# features and NetFx3 the same way. Treating it as failure blamed the Windows
+# edition and left the machine looping forever.
+$rebootPending = $LASTEXITCODE -eq 3010
+if ($LASTEXITCODE -ne 0 -and -not $rebootPending) {
+    throw "Could not enable Client-EmbeddedShellLauncher (DISM exit $LASTEXITCODE). Is this an Enterprise/Education/IoT Enterprise edition?"
 }
+if ($rebootPending) { Write-Host '  enabled, servicing wants a restart (expected during provisioning)' }
 
 $actionMap = @{ RestartShell = 0; RestartDevice = 1; ShutdownDevice = 2; DoNothing = 3 }
 $action = [uint32]$actionMap[$OnShellExit]

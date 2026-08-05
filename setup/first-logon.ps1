@@ -17,7 +17,7 @@ $marker = Join-Path $env:LOCALAPPDATA 'Consolize\first-logon-done'
 
 # What the SYSTEM finish task waits for: this account is ready to become a
 # console. setup-console.ps1 grants this account write access to that folder.
-$readyMarker = Join-Path $env:ProgramData 'Consolize\account-ready'
+$readyMarker = Join-Path $env:ProgramData 'Consolize\shared\account-ready'
 
 if (Test-Path $marker) { return }
 
@@ -35,15 +35,28 @@ if (Test-Path $quietUser) {
     Write-Warning "quiet-user.ps1 not found next to this script ($here)."
 }
 
-# --- Steam must not autostart: consolize is what launches it -----------------
+# --- this account's own startup ----------------------------------------------
+# Phase 1 runs as the administrator, where HKCU is theirs, so it deliberately
+# skips per-user entries. This is the session where the console account's own
+# startup can be emptied, and everything removed is backed up first.
 $runKey = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
 if (Test-Path $runKey) {
+    $removed = @()
     foreach ($p in (Get-ItemProperty $runKey).PSObject.Properties) {
         if ($p.Name -like 'PS*') { continue }
-        if ($p.Name -match 'steam' -or [string]$p.Value -match 'steam\.exe') {
-            Remove-ItemProperty -Path $runKey -Name $p.Name -Force -ErrorAction SilentlyContinue
-            Write-Host "  removed Steam autostart for this account ($($p.Name))"
+        $removed += [pscustomobject]@{ Name = $p.Name; Value = [string]$p.Value }
+    }
+
+    if ($removed) {
+        $backup = Join-Path $env:LOCALAPPDATA 'Consolize\startup-backup.json'
+        New-Item -ItemType Directory -Force -Path (Split-Path $backup) | Out-Null
+        $removed | ConvertTo-Json -Depth 3 | Set-Content $backup -Encoding UTF8
+
+        foreach ($entry in $removed) {
+            Remove-ItemProperty -Path $runKey -Name $entry.Name -Force -ErrorAction SilentlyContinue
+            Write-Host "  removed from this account's startup: $($entry.Name)"
         }
+        Write-Host "  backed up to $backup"
     }
 }
 
@@ -76,9 +89,44 @@ function Test-SteamLogin {
     return ($raw -match '"(RememberPassword|AutoLogin)"\s+"1"')
 }
 
+# Which frontend the console boots into decides what this account still needs.
+# Without reading it, a Playnite console would sit here waiting for a Steam
+# sign-in that is never coming, and the whole automated flow would dead-end.
+$bootInto = 'steam'
+$answersPath = Join-Path $env:ProgramData 'Consolize\answers.json'
+if (Test-Path $answersPath) {
+    try {
+        $answers = Get-Content $answersPath -Raw | ConvertFrom-Json
+        if ($answers.BootInto) { $bootInto = $answers.BootInto }
+    } catch {
+        Write-Warning "Could not read $answersPath, assuming Steam."
+    }
+}
+
 $script:loginConfirmed = $false
 $steam = Get-SteamPath
-if (-not $steam) {
+
+if ($bootInto -ne 'steam') {
+    Write-Host ''
+    Write-Host "==> Frontend for this account: $bootInto" -ForegroundColor Cyan
+    $frontendPath = switch ($bootInto) {
+        'playnite' { Join-Path $env:LOCALAPPDATA 'Playnite\Playnite.FullscreenApp.exe' }
+        'hydra'    { Join-Path $env:LOCALAPPDATA 'Programs\Hydra\Hydra.exe' }
+        default    { $null }
+    }
+    if ($frontendPath -and (Test-Path $frontendPath)) {
+        Write-Host "  found: $frontendPath"
+        Write-Host '  opening it once so it can finish its own first-run setup...'
+        Start-Process $frontendPath
+        Start-Sleep -Seconds 10
+        $confirm = Read-Host '  Did it open and look usable? [Y/n]'
+        $script:loginConfirmed = $confirm -notmatch '^[nN]'
+    } else {
+        Write-Warning "  $bootInto is not installed for this account ($frontendPath)."
+        Write-Warning '  Launchers other than Steam install per user, so install it while'
+        Write-Warning '  signed in here, then run this script again.'
+    }
+} elseif (-not $steam) {
     Write-Warning 'Steam is not installed. Run bootstrap-gaming.ps1 as admin first.'
 } else {
     Write-Host ''
@@ -120,15 +168,6 @@ if (-not $steam) {
             Write-Host '  Big Picture confirmed.' -ForegroundColor Green
             $script:loginConfirmed = $true
 
-            # Steam owns shortcuts.vdf while it runs and rewrites it on exit,
-            # so the entry has to be added with Steam closed. We are about to
-            # reboot anyway.
-            $shortcuts = Join-Path $here 'add-console-shortcuts.ps1'
-            if (Test-Path $shortcuts) {
-                Write-Host ''
-                Write-Host '==> Adding "Desktop Mode" to the Steam library' -ForegroundColor Cyan
-                & $shortcuts -Force
-            }
             # Steam re-adds its autostart entry once it runs
             foreach ($p in (Get-ItemProperty $runKey -ErrorAction SilentlyContinue).PSObject.Properties) {
                 if ($p.Name -like 'PS*') { continue }
@@ -142,6 +181,20 @@ if (-not $steam) {
     }
 }
 
+# Outside the sign-in branch on purpose: an account that was ALREADY signed in
+# skips that branch entirely, and used to end up as a console with no way to
+# reach the desktop or the settings panel.
+if ($script:loginConfirmed -and $bootInto -eq 'steam') {
+    $shortcuts = Join-Path $here 'add-console-shortcuts.ps1'
+    if (Test-Path $shortcuts) {
+        Write-Host ''
+        Write-Host '==> Adding "Quick Settings" and "Desktop Mode" to the Steam library' -ForegroundColor Cyan
+        # a child script with its own EAP=Stop would otherwise kill this one and
+        # the account would never report itself ready
+        try { & $shortcuts -Force } catch { Write-Warning "  could not add them: $($_.Exception.Message)" }
+    }
+}
+
 # Trust what was actually seen on screen over the file heuristics: the QR
 # sign-in and some Steam Guard flows do not write the checkbox key at all.
 $steamReady = $script:loginConfirmed
@@ -151,7 +204,9 @@ if ($steamReady) {
     New-Item -ItemType Directory -Force -Path (Split-Path $marker) | Out-Null
     Set-Content $marker (Get-Date).ToString('s') -Encoding UTF8
     try {
-        Set-Content $readyMarker (Get-Date).ToString('s') -Encoding UTF8
+        # the account name, not a timestamp: the finish task uses it to reject a
+        # marker left behind by an earlier run against a different account
+        Set-Content $readyMarker $env:USERNAME -Encoding UTF8
         Write-Host ''
         Write-Host 'This account is ready.' -ForegroundColor Green
         Write-Host 'The machine takes it from here: it checks everything, replaces the shell'
@@ -166,9 +221,9 @@ if ($steamReady) {
     }
 } else {
     Write-Host ''
-    Write-Warning 'Steam is not signed in on this account, so the shell will NOT be replaced.'
+    Write-Warning "This account is not ready ($bootInto), so the shell will NOT be replaced."
     Write-Warning 'That is deliberate: booting into a login window a controller cannot fill'
-    Write-Warning 'in would strand you. Sign in to Steam with "Remember me", then run:'
+    Write-Warning 'in would strand you. Finish the frontend sign-in, then run:'
     Write-Host "    $($MyInvocation.MyCommand.Path)"
     Read-Host 'Press Enter to close'
 }

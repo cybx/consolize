@@ -26,6 +26,9 @@ param([switch]$Restore)
 $ErrorActionPreference = 'Stop'
 
 $logonUI = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI'
+# Custom Logon reads its settings from here, NOT from LogonUI: writing
+# BrandingNeutral under LogonUI reported success and did nothing at all.
+$embeddedLogon = 'HKLM:\SOFTWARE\Microsoft\Windows Embedded\EmbeddedLogon'
 $policies = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
 $winlogon = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
 
@@ -44,7 +47,23 @@ if ($Restore) {
     bcdedit.exe /deletevalue '{current}' noerrordisplay 2>&1 | Out-Null
     Remove-ItemProperty $logonUI -Name AnimationDisabled -ErrorAction SilentlyContinue
     Remove-ItemProperty $logonUI -Name BrandingNeutral -ErrorAction SilentlyContinue
+    foreach ($name in @('BrandingNeutral', 'HideAutoLogonUI', 'AnimationDisabled')) {
+        Remove-ItemProperty $embeddedLogon -Name $name -ErrorAction SilentlyContinue
+    }
     Remove-ItemProperty $policies -Name DisableStatusMessages -ErrorAction SilentlyContinue
+
+    # Restore the boot menu timeout this script zeroed. Without this a dual boot
+    # machine keeps the other OS permanently unreachable, while the script says
+    # everything is back to normal.
+    $savedTimeout = Join-Path $env:ProgramData 'Consolize\boot-timeout.txt'
+    if (Test-Path $savedTimeout) {
+        $value = (Get-Content $savedTimeout -Raw).Trim()
+        if ($value -match '^\d+$') { bcdedit.exe /timeout $value | Out-Null; Write-Host "  boot menu timeout restored to $value" }
+        Remove-Item $savedTimeout -Force -ErrorAction SilentlyContinue
+    } else {
+        bcdedit.exe /timeout 30 | Out-Null
+        Write-Host '  boot menu timeout restored to the Windows default (30)'
+    }
     Set-RegValue $winlogon 'EnableFirstLogonAnimation' 1
     Write-Host 'Restored. The logo and welcome screen come back on the next boot.'
     return
@@ -74,16 +93,34 @@ bcdedit.exe /set '{globalsettings}' bootuxdisabled on | Out-Null
 bcdedit.exe /set '{current}' quietboot on | Out-Null
 bcdedit.exe /set '{current}' bootstatuspolicy ignoreallfailures | Out-Null
 bcdedit.exe /set '{current}' noerrordisplay on | Out-Null
-bcdedit.exe /timeout 0 | Out-Null
-Write-Host '  bcdedit: bootuxdisabled, quietboot, bootstatuspolicy, noerrordisplay, timeout 0'
+
+# Zeroing the boot menu timeout on a dual boot machine hides the other OS, so
+# only do it when Windows is the only entry, and record the old value first.
+$entries = (bcdedit.exe /enum osloader | Select-String -Pattern '^identifier' -AllMatches).Count
+if ($entries -le 1) {
+    $current = (bcdedit.exe /enum '{bootmgr}' | Select-String -Pattern 'timeout\s+(\d+)').Matches.Groups[1].Value
+    if ($current) {
+        New-Item -ItemType Directory -Force -Path (Join-Path $env:ProgramData 'Consolize') | Out-Null
+        Set-Content (Join-Path $env:ProgramData 'Consolize\boot-timeout.txt') $current -Encoding UTF8
+    }
+    bcdedit.exe /timeout 0 | Out-Null
+    Write-Host '  bcdedit: bootuxdisabled, quietboot, bootstatuspolicy, noerrordisplay, timeout 0'
+} else {
+    Write-Host "  bcdedit: bootuxdisabled, quietboot, bootstatuspolicy, noerrordisplay"
+    Write-Host "  ($entries boot entries found, leaving the menu timeout alone so the other OS stays reachable)"
+}
 
 # --- logon: no welcome screen, no status text --------------------------------
 Write-Host ''
 Write-Host 'Logon: welcome screen and status messages off...'
 Set-RegValue $logonUI 'AnimationDisabled' 1
-# BrandingNeutral hides the logon screen furniture (power, language, ease of
-# access and the rest). 1 keeps the surface blank on a machine that logs itself in.
-Set-RegValue $logonUI 'BrandingNeutral' 1
+# BrandingNeutral is a bitmask, not a flag: 1 logon buttons, 2 power,
+# 4 language, 8 ease of access, 16 switch user, 32 blocked shutdown resolver.
+# 49 = buttons + switch user + BSDR, which is what a self-logging-in console
+# should never show.
+Set-RegValue $embeddedLogon 'BrandingNeutral' 49
+Set-RegValue $embeddedLogon 'HideAutoLogonUI' 1
+Set-RegValue $embeddedLogon 'AnimationDisabled' 1
 Set-RegValue $winlogon 'EnableFirstLogonAnimation' 0
 # GPO equivalent: "Remove Boot / Shutdown / Logon / Logoff status messages"
 Set-RegValue $policies 'DisableStatusMessages' 1

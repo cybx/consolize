@@ -190,65 +190,63 @@ internal sealed class QuickSettingsForm : Form
 
         SetStatus("A pairs or connects, Y scans for new devices, X forgets");
 
-        Add("Scan for new devices (takes a few seconds)", () =>
-        {
-            if (_busy) return;
-            _busy = true;
-            SetStatus("scanning...");
-            try
+        Add("Scan for new devices (takes a few seconds)", () => RunInBackground(
+            "scanning...",
+            () => LoadBluetooth(scan: true),
+            devices =>
             {
-                _btDevices = Bluetooth.GetDevices(scan: true);
-                SetStatus($"{_btDevices.Count} device(s) found");
-            }
-            finally
-            {
-                _busy = false;
-            }
-            Render();
-        });
+                _btDevices = devices;
+                SetStatus($"{devices.Count} device(s) found");
+            }));
 
-        if (_btDevices.Count == 0) _btDevices = Bluetooth.GetDevices(scan: false);
+        if (_btDevices.Count == 0) _btDevices = LoadBluetooth(scan: false);
 
-        foreach (var device in _btDevices.OrderByDescending(d => d.Connected).ThenBy(d => d.Name))
+        // Iterate the same list the rows are indexed against. Sorting only in
+        // the projection meant "forget" acted on a different device than the
+        // highlighted one, quite possibly the gamepad in your hands.
+        foreach (var device in _btDevices)
         {
             var state = device.Connected ? "connected"
                 : device.Authenticated ? "paired"
                 : "not paired";
             var captured = device;
-            Add($"{device.Name}   [{state}]", () =>
-            {
-                if (_busy) return;
-                _busy = true;
-                try
+            Add($"{device.Name}   [{state}]", () => RunInBackground(
+                $"pairing with {captured.Name}...",
+                () =>
                 {
-                    SetStatus($"pairing with {captured.Name}...");
                     var (ok, message) = Bluetooth.Pair(captured.Address);
-                    SetStatus($"{captured.Name}: {message}");
-                    _btDevices = Bluetooth.GetDevices(scan: false);
-                }
-                finally
+                    return (Message: message, Devices: LoadBluetooth(scan: false));
+                },
+                result =>
                 {
-                    _busy = false;
-                }
-                Render();
-            });
+                    _btDevices = result.Devices;
+                    SetStatus($"{captured.Name}: {result.Message}");
+                }));
         }
     }
+
+    private List<string> _wifiProfiles = new();
+    private bool _wifiLoaded;
 
     private void RenderNetwork()
     {
         _header.Text = "Network";
         SetStatus("A connects to a saved network");
 
-        var profiles = RunCommand("netsh", "wlan show profiles")
-            .Split('\n')
-            .Where(line => line.Contains(':') && line.Contains("Profile", StringComparison.OrdinalIgnoreCase)
-                        && !line.Contains("Group", StringComparison.OrdinalIgnoreCase))
-            .Select(line => line.Split(':', 2)[1].Trim())
-            .Where(name => name.Length > 0)
-            .Distinct()
-            .ToList();
+        // netsh can take seconds; never on the UI thread
+        if (!_wifiLoaded)
+        {
+            _wifiLoaded = true;
+            RunInBackground("reading saved networks...", LoadWifiProfiles, profiles =>
+            {
+                _wifiProfiles = profiles;
+                SetStatus("A connects to a saved network");
+            });
+            Add("reading saved networks...", () => { });
+            return;
+        }
 
+        var profiles = _wifiProfiles;
         if (profiles.Count == 0)
         {
             Add("no saved wifi networks", () => { });
@@ -259,12 +257,10 @@ internal sealed class QuickSettingsForm : Form
         foreach (var profile in profiles)
         {
             var captured = profile;
-            Add($"Connect to {profile}", () =>
-            {
-                SetStatus($"connecting to {captured}...");
-                RunCommand("netsh", $"wlan connect name=\"{captured}\"");
-                SetStatus($"asked Windows to connect to {captured}");
-            });
+            Add($"Connect to {profile}", () => RunInBackground(
+                $"connecting to {captured}...",
+                () => RunCommand("netsh", $"wlan connect name=\"{captured}\""),
+                _ => SetStatus($"asked Windows to connect to {captured}")));
         }
     }
 
@@ -279,6 +275,64 @@ internal sealed class QuickSettingsForm : Form
         Add("Sleep", () => { Send("sleep"); Close(); });
         Add("Restart", () => Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 0") { UseShellExecute = false }));
         Add("Shut down", () => Process.Start(new ProcessStartInfo("shutdown.exe", "/s /t 0") { UseShellExecute = false }));
+    }
+
+    private static List<string> LoadWifiProfiles()
+    {
+        return RunCommand("netsh", "wlan show profiles")
+            .Split('\n')
+            .Where(line => line.Contains(':') && line.Contains("Profile", StringComparison.OrdinalIgnoreCase)
+                        && !line.Contains("Group", StringComparison.OrdinalIgnoreCase))
+            .Select(line => line.Split(':', 2)[1].Trim())
+            .Where(name => name.Length > 0)
+            .Distinct()
+            .ToList();
+    }
+
+    private static List<BluetoothDeviceInfo> LoadBluetooth(bool scan)
+    {
+        return Bluetooth.GetDevices(scan)
+            .OrderByDescending(d => d.Connected)
+            .ThenBy(d => d.Name)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Runs slow work off the UI thread. A Bluetooth inquiry or a pairing
+    /// attempt takes seconds to tens of seconds, and doing it inline froze a
+    /// borderless topmost window over the game with the B button dead: on a
+    /// console with no keyboard, the only way out was the power button.
+    /// </summary>
+    private void RunInBackground<T>(string status, Func<T> work, Action<T> onDone)
+    {
+        if (_busy) return;
+        _busy = true;
+        SetStatus(status);
+
+        Task.Run(work).ContinueWith(task =>
+        {
+            if (IsDisposed || Disposing) return;
+            try
+            {
+                BeginInvoke(new Action(() =>
+                {
+                    _busy = false;
+                    if (task.IsFaulted)
+                    {
+                        SetStatus($"failed: {task.Exception?.GetBaseException().Message}");
+                    }
+                    else
+                    {
+                        onDone(task.Result);
+                    }
+                    Render();
+                }));
+            }
+            catch (ObjectDisposedException)
+            {
+                // the panel was closed while the work was running
+            }
+        });
     }
 
     private static string Bar(int percent)
@@ -356,9 +410,14 @@ internal sealed class QuickSettingsForm : Form
         var index = _list.SelectedIndex - 1;   // row 0 is the scan entry
         if (index < 0 || index >= _btDevices.Count) return;
         var device = _btDevices[index];
-        SetStatus(Bluetooth.Remove(device.Address) ? $"{device.Name} forgotten" : $"could not forget {device.Name}");
-        _btDevices = Bluetooth.GetDevices(scan: false);
-        Render();
+        RunInBackground(
+            $"forgetting {device.Name}...",
+            () => (Ok: Bluetooth.Remove(device.Address), Devices: LoadBluetooth(scan: false)),
+            result =>
+            {
+                _btDevices = result.Devices;
+                SetStatus(result.Ok ? $"{device.Name} forgotten" : $"could not forget {device.Name}");
+            });
     }
 
     private static void Send(string command)

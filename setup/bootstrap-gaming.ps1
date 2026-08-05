@@ -230,7 +230,10 @@ foreach ($key in $selected) {
             $splat = @{}
             if ($Launchers) { $splat['Install'] = $Launchers }
             elseif ($Preset -eq 'all') { $splat['Install'] = 'all' }
-            elseif ($Preset -eq 'minimal') { $splat['Install'] = 'steam' }
+            # any other preset, including 'recommended': without this the picker
+            # was skipped (BootInto was set) and nothing was installed at all,
+            # while the run still reported success
+            elseif ($Preset) { $splat['Install'] = 'steam' }
             if ($BootInto) { $splat['BootInto'] = $BootInto }
             elseif ($Preset) { $splat['BootInto'] = 'steam' }
             # during provisioning the console account may have no profile yet

@@ -34,7 +34,11 @@ $here = $PSScriptRoot
 $stateDir = Join-Path $env:ProgramData 'Consolize'
 $answersPath = Join-Path $stateDir 'answers.json'
 $logDir = Join-Path $stateDir 'logs'
-$readyMarker = Join-Path $stateDir 'account-ready'
+# The only place the console account is allowed to write. Keeping it separate
+# from the scripts and answers.json is what stops a writable file from turning
+# into SYSTEM execution at the next logon.
+$sharedDir = Join-Path $stateDir 'shared'
+$readyMarker = Join-Path $sharedDir 'account-ready'
 $taskFirstLogon = 'ConsolizeFirstLogon'
 $taskFinish = 'ConsolizeFinish'
 
@@ -73,9 +77,24 @@ if ($Abort) {
 # account to report itself ready, then replaces the shell and reboots.
 
 if ($Finish) {
-    $answers = Get-Content $answersPath -Raw | ConvertFrom-Json
+    try {
+        $answers = Get-Content $answersPath -Raw | ConvertFrom-Json
+    } catch {
+        Write-FinishLog "cannot read $answersPath : $($_.Exception.Message)"
+        return
+    }
     $user = $answers.UserName
     Write-FinishLog "finish task started, waiting for '$user' to be ready"
+
+    # A marker naming a different account is left over from an earlier run and
+    # must not be taken as "this account finished phase 2".
+    if (Test-Path $readyMarker) {
+        $markerUser = (Get-Content $readyMarker -Raw -ErrorAction SilentlyContinue).Trim()
+        if ($markerUser -and $markerUser -ne $user) {
+            Write-FinishLog "discarding a ready marker left by '$markerUser'"
+            Remove-Item $readyMarker -Force -ErrorAction SilentlyContinue
+        }
+    }
 
     $waited = 0
     while (-not (Test-Path $readyMarker) -and $waited -lt 3600) {
@@ -89,17 +108,26 @@ if ($Finish) {
     }
     Write-FinishLog 'account reported ready, running preflight'
 
-    $preflightOut = & (Join-Path $here 'preflight.ps1') -UserName $user 2>&1
+    # *>&1, not 2>&1: preflight reports through Write-Host, which is stream 6.
+    # With 2>&1 the log recorded "fix the issues above" and no issues.
+    $frontend = if ($answers.BootInto) { $answers.BootInto } else { 'steam' }
+    $preflightOut = & (Join-Path $here 'preflight.ps1') -UserName $user -Frontend $frontend *>&1
     $preflightOut | ForEach-Object { Write-FinishLog "  $_" }
     if ($LASTEXITCODE -ne 0) {
         Write-FinishLog 'preflight failed; NOT replacing the shell (this is the safe outcome)'
-        Write-FinishLog "fix the issues above, then run: .\setup-console.ps1 -Finish"
+        Write-FinishLog 'fix the issues above, then run: setup-console.ps1 -Finish'
         return
     }
 
     Write-FinishLog 'preflight passed, replacing the shell'
-    & (Join-Path $here 'enable-shell-launcher.ps1') -UserName $user -SkipPreflight 2>&1 |
-        ForEach-Object { Write-FinishLog "  $_" }
+    try {
+        & (Join-Path $here 'enable-shell-launcher.ps1') -UserName $user -SkipPreflight *>&1 |
+            ForEach-Object { Write-FinishLog "  $_" }
+    } catch {
+        Write-FinishLog "FAILED to replace the shell: $($_.Exception.Message)"
+        Write-FinishLog 'the machine still boots to the desktop; tasks left in place to retry'
+        return
+    }
 
     Remove-ConsolizeTasks
     Remove-Item $readyMarker -Force -ErrorAction SilentlyContinue
@@ -242,6 +270,10 @@ $UserName = $a.UserName
 $transcript = Join-Path $logDir 'setup.log'
 try { Start-Transcript -Path $transcript -Append | Out-Null } catch { }
 
+# A marker from an earlier attempt would let the finish task skip the wait and
+# replace the shell for an account that never completed phase 2.
+Remove-Item $readyMarker -Force -ErrorAction SilentlyContinue
+
 # --- console account ---------------------------------------------------------
 # Created here rather than during the interview, so a resumed run (-Unattended,
 # which never sees the interview) still ends up with the account.
@@ -306,7 +338,10 @@ Step 'Power: rest mode'
 & (Join-Path $here 'power-console.ps1') -RestMode $a.RestMode
 
 Step 'Emptying Windows startup'
-& (Join-Path $here 'clean-startup.ps1') -All
+# -MachineOnly on purpose: HKCU here is the ADMINISTRATOR's, and silently
+# emptying their OneDrive, password manager and VPN is not what anyone asked
+# for. The console account's own startup is cleaned in its session, at phase 2.
+& (Join-Path $here 'clean-startup.ps1') -All -MachineOnly
 
 if ($a.Autologon) {
     Step 'Autologon'
@@ -319,10 +354,30 @@ if ($a.Autologon) {
 Step 'Scheduling the rest'
 Remove-ConsolizeTasks
 
-# The console account runs as a limited user and has to write the "ready"
-# marker here; ProgramData does not grant that by inheritance.
-icacls $stateDir /grant "${UserName}:(OI)(CI)M" /T | Out-Null
-Write-Host "  $UserName can write to $stateDir"
+# The console account has to write the "ready" marker, and ProgramData does not
+# grant that by inheritance. Grant ONLY the shared subfolder, never the tree:
+# the setup scripts live under this same directory and the finish task runs them
+# as SYSTEM at every logon, so a writable script path would hand SYSTEM to
+# anything running as the console account (a modded game, an exploited frontend).
+New-Item -ItemType Directory -Force -Path $sharedDir | Out-Null
+icacls $sharedDir /grant "${UserName}:(OI)(CI)M" | Out-Null
+Write-Host "  $UserName can write to $sharedDir (and nothing else here)"
+
+# Refuse to arm a SYSTEM task whose script a non-admin could rewrite.
+$scriptAcl = (Get-Acl $here).Access | Where-Object {
+    $_.FileSystemRights -match 'Write|Modify|FullControl' -and
+    $_.AccessControlType -eq 'Allow' -and
+    $_.IdentityReference -notmatch 'SYSTEM|Administrators|TrustedInstaller|CREATOR OWNER'
+}
+if ($scriptAcl) {
+    throw "$here is writable by $($scriptAcl.IdentityReference -join ', '). Refusing to run a SYSTEM task from there."
+}
+
+# Both tasks need the same battery policy. Without it a task inherits
+# DisallowStartIfOnBatteries, so on a handheld or an unplugged laptop phase 2
+# would simply never fire, with only a Task Scheduler event to show for it.
+$taskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+    -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 
 $firstLogonScript = Join-Path $here 'first-logon.ps1'
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
@@ -330,7 +385,7 @@ $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $UserName
 $principal = New-ScheduledTaskPrincipal -UserId $UserName -LogonType Interactive -RunLevel Limited
 Register-ScheduledTask -TaskName $taskFirstLogon -Action $action -Trigger $trigger -Principal $principal `
-    -Description 'consolize: finish the console account on its first logon' | Out-Null
+    -Settings $taskSettings -Description 'consolize: finish the console account on its first logon' | Out-Null
 Write-Host "  $taskFirstLogon registered (runs as $UserName)"
 
 $selfPath = Join-Path $here 'setup-console.ps1'
@@ -338,9 +393,8 @@ $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
     -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$selfPath`" -Finish"
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $UserName
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 2) -AllowStartIfOnBatteries
 Register-ScheduledTask -TaskName $taskFinish -Action $action -Trigger $trigger -Principal $principal `
-    -Settings $settings -Description 'consolize: replace the shell once the console account is ready' | Out-Null
+    -Settings $taskSettings -Description 'consolize: replace the shell once the console account is ready' | Out-Null
 Write-Host "  $taskFinish registered (runs as SYSTEM, waits for the account)"
 
 try { Stop-Transcript | Out-Null } catch { }

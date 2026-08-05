@@ -30,8 +30,19 @@ $actionCode = if ($RestMode -eq 'Hibernate') { 2 } else { 1 }
 
 function Invoke-PowerCfg {
     param([Parameter(ValueFromRemainingArguments)] [string[]]$Arguments)
-    $out = & powercfg.exe @Arguments 2>&1
-    if ($LASTEXITCODE -ne 0) { Write-Warning "powercfg $($Arguments -join ' '): $out" }
+    # 2>&1 wraps each native stderr line in an ErrorRecord, and under
+    # $ErrorActionPreference='Stop' that is a TERMINATING error: the warning
+    # below would never run and the whole provisioning would abort on any
+    # machine powercfg complains about (no Ultimate Performance template, a VM
+    # that cannot hibernate). Drop back to Continue just for the call.
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & powercfg.exe @Arguments 2>&1
+        if ($LASTEXITCODE -ne 0) { Write-Warning "powercfg $($Arguments -join ' '): $out" }
+    } finally {
+        $ErrorActionPreference = $previous
+    }
 }
 
 if ($ListWakeDevices) {
@@ -96,7 +107,9 @@ Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' 
 $ultimate = 'e9a42b02-d5df-448d-aa00-03f14749eb61'
 $high = '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c'
 $schemes = (powercfg /list) -join "`n"
-if ($schemes -notmatch $ultimate) { powercfg -duplicatescheme $ultimate 2>&1 | Out-Null }
+# Modern Standby machines have no Ultimate Performance template, so this call
+# fails exactly where it is most likely to run. Invoke-PowerCfg tolerates that.
+if ($schemes -notmatch $ultimate) { Invoke-PowerCfg -duplicatescheme $ultimate }
 $schemes = (powercfg /list) -join "`n"
 $target = if ($schemes -match $ultimate) { $ultimate } else { $high }
 Write-Host "Active power scheme: $(if ($target -eq $ultimate) { 'Ultimate Performance' } else { 'High Performance' })"

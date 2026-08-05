@@ -106,10 +106,16 @@ You can try the session manager inside a normal desktop session first:
 ```powershell
 dotnet publish src/Consolize.SessionManager -c Release -r win-x64 -o out/publish
 ./out/publish/consolize.exe          # Steam Big Picture opens, watchdog active
-./out/publish/consolize.exe send status
-./out/publish/consolize.exe send desktop
-./out/publish/consolize.exe send quit
+Start-Process ./out/publish/consolize.exe -ArgumentList 'send status'  -NoNewWindow -Wait
+Start-Process ./out/publish/consolize.exe -ArgumentList 'send desktop' -NoNewWindow -Wait
+Start-Process ./out/publish/consolize.exe -ArgumentList 'send quit'    -NoNewWindow -Wait
 ```
+
+`Start-Process -Wait` rather than a plain call on purpose: `consolize.exe` is a
+GUI subsystem binary, so being the shell never flashes a console window, and
+PowerShell does not wait for those. A plain `consolize send status` still prints,
+it just arrives after your prompt comes back and cannot be captured into a
+variable.
 
 Config lives at `%LOCALAPPDATA%\Consolize\config.json` (created on first run,
 with `%ProgramData%\Consolize\config.json` as the machine-wide fallback), logs at

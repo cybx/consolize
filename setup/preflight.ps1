@@ -29,6 +29,46 @@ function Write-Check {
     if ($Result -eq 'WARN') { $script:warnings++ }
 }
 
+# This script runs as SYSTEM from the finish task, so HKCU: is SYSTEM's own
+# hive and every per-user check through it is vacuous. Read the target account's
+# hive instead, mounting NTUSER.DAT when that user is not signed in.
+function Get-UserHiveValue {
+    param([string]$User, [string]$SubKey, [string]$Name)
+
+    try {
+        $sid = (New-Object System.Security.Principal.NTAccount($User)).Translate(
+            [System.Security.Principal.SecurityIdentifier]).Value
+    } catch {
+        return $null
+    }
+
+    $hive = "Registry::HKEY_USERS\$sid"
+    $mounted = $null
+    if (-not (Test-Path $hive)) {
+        $profileDir = (Get-CimInstance Win32_UserProfile -ErrorAction SilentlyContinue |
+            Where-Object { $_.SID -eq $sid } | Select-Object -First 1).LocalPath
+        if (-not $profileDir) { return $null }
+        $dat = Join-Path $profileDir 'NTUSER.DAT'
+        if (-not (Test-Path $dat)) { return $null }
+
+        $mounted = "consolize-$sid"
+        & reg.exe load "HKU\$mounted" $dat *>$null
+        if ($LASTEXITCODE -ne 0) { return $null }
+        $hive = "Registry::HKEY_USERS\$mounted"
+    }
+
+    try {
+        $key = Join-Path $hive $SubKey
+        if (-not (Test-Path $key)) { return $null }
+        return (Get-ItemProperty -Path $key -Name $Name -ErrorAction SilentlyContinue).$Name
+    } finally {
+        if ($mounted) {
+            [GC]::Collect(); [GC]::WaitForPendingFinalizers()
+            & reg.exe unload "HKU\$mounted" *>$null
+        }
+    }
+}
+
 function Get-SteamPath {
     foreach ($dir in @(
         (Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam' -Name InstallPath -ErrorAction SilentlyContinue).InstallPath,
@@ -74,10 +114,27 @@ switch ($Frontend) {
             $vdf = Join-Path $steam 'config\loginusers.vdf'
             if (Test-Path $vdf) {
                 $raw = Get-Content $vdf -Raw
-                $remembered = $raw -match '"RememberPassword"\s+"1"'
+                # Same predicate as first-logon.ps1: the QR sign-in never shows
+                # the "remember me" checkbox and writes AutoLogin instead, so
+                # demanding RememberPassword alone failed the exact sign-in this
+                # project recommends.
+                $remembered = $raw -match '"(RememberPassword|AutoLogin)"\s+"1"'
                 $account = ([regex]::Match($raw, '"AccountName"\s+"([^"]+)"')).Groups[1].Value
-                if ($remembered) {
-                    Write-Check PASS 'Steam has a saved login' "account: $account"
+
+                # loginusers.vdf is machine-wide, so it says nothing about THIS
+                # account: the installing admin's own sign-in would pass it.
+                # The autologin account is per user, and that is what decides
+                # whether Big Picture comes up signed in.
+                $autoLogin = Get-UserHiveValue -User $UserName -SubKey 'SOFTWARE\Valve\Steam' -Name 'AutoLoginUser'
+
+                if ($remembered -and $autoLogin) {
+                    Write-Check PASS 'Steam has a saved login' "account: $account (signed in as $UserName)"
+                } elseif ($remembered -and -not $autoLogin) {
+                    Write-Check FAIL "Steam is signed in, but not on '$UserName'" @"
+Windows keeps the Steam login per user, and the console account has no
+AutoLoginUser. Sign in to Steam while logged in as $UserName, not from this
+account, or the first boot lands on a login window a controller cannot fill in.
+"@
                 } else {
                     Write-Check FAIL 'Steam login is not saved' @'
 Big Picture will not open; you get the desktop login window with no Explorer
@@ -95,25 +152,45 @@ lands on a login window that a controller cannot fill in.
         }
     }
     'playnite' {
-        $pn = Join-Path $env:LOCALAPPDATA 'Playnite\Playnite.FullscreenApp.exe'
-        if (Test-Path $pn) { Write-Check PASS 'Playnite installed' $pn }
-        else { Write-Check FAIL 'Playnite not installed' 'winget install Playnite.Playnite' }
+        # Playnite installs per user by default, so it has to exist in the
+        # CONSOLE account's profile, not in the profile running this check.
+        $profileDir = (Get-CimInstance Win32_UserProfile -ErrorAction SilentlyContinue |
+            Where-Object { $_.LocalPath -like "*\$UserName" } | Select-Object -First 1).LocalPath
+        $candidates = @()
+        if ($profileDir) { $candidates += (Join-Path $profileDir 'AppData\Local\Playnite\Playnite.FullscreenApp.exe') }
+        $candidates += (Join-Path $env:LOCALAPPDATA 'Playnite\Playnite.FullscreenApp.exe')
+        $candidates += 'C:\Program Files\Playnite\Playnite.FullscreenApp.exe'
+
+        $found = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if ($found -and $profileDir -and $found -like "$profileDir*") {
+            Write-Check PASS 'Playnite installed for the console account' $found
+        } elseif ($found) {
+            Write-Check FAIL "Playnite is installed, but not for '$UserName'" @"
+Found at $found. Playnite installs per user, so the console account cannot see
+it and the frontend would never start. Install it while signed in as $UserName.
+"@
+        } else {
+            Write-Check FAIL 'Playnite not installed' 'winget install Playnite.Playnite'
+        }
     }
     'custom' { Write-Check WARN 'Custom frontend' 'Check CustomCommand in %LOCALAPPDATA%\Consolize\config.json yourself.' }
 }
 
 # --- nothing else fighting for the logon ------------------------------------
 $autostart = @()
-foreach ($key in @(
-    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
-    'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
-)) {
+foreach ($key in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run')) {
     if (-not (Test-Path $key)) { continue }
     $props = Get-ItemProperty $key
     foreach ($p in $props.PSObject.Properties) {
         if ($p.Name -like 'PS*') { continue }
         if ($p.Name -match 'steam' -or [string]$p.Value -match 'steam\.exe') { $autostart += $p.Name }
     }
+}
+# the per-user Run key of the CONSOLE account, which is the one that matters and
+# is not HKCU: from here
+foreach ($name in @('Steam')) {
+    $value = Get-UserHiveValue -User $UserName -SubKey 'SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name $name
+    if ($value) { $autostart += "$name (in $UserName's profile)" }
 }
 if ($autostart.Count -gt 0) {
     Write-Check FAIL 'Steam autostarts on its own' "Entries: $($autostart -join ', '). Two Steams will race at logon. Fix: .\clean-startup.ps1"
