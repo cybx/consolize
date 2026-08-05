@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.Drawing;
 using System.IO.Pipes;
 using System.Text.Json;
+using System.Windows.Forms;
 using Microsoft.Win32;
 
 namespace Consolize.SessionManager;
@@ -34,6 +36,16 @@ internal sealed record AppConfig
     public bool FallbackToDesktopAfterMaxCrashes { get; init; } = true;
 
     public int RelaunchDelaySeconds { get; init; } = 3;
+
+    /// <summary>Fullscreen image shown while the frontend starts. Defaults to
+    /// splash.png next to the config, if one is there.</summary>
+    public string? SplashImage { get; init; }
+
+    public bool SplashEnabled { get; init; } = true;
+
+    /// <summary>Upper bound: the splash also closes as soon as the frontend
+    /// puts a window on screen.</summary>
+    public int SplashSeconds { get; init; } = 12;
 }
 
 internal static class Program
@@ -192,6 +204,7 @@ internal static class Program
 
             lock (Sync) _frontend = proc;
             Log($"frontend started: {exe} {arguments} (pid {proc.Id})");
+            ShowSplash(proc);
 
             try { proc.WaitForExit(); } catch { /* killed externally */ }
 
@@ -338,6 +351,86 @@ internal static class Program
         }
 
         return null;
+    }
+
+    // ----- boot splash ------------------------------------------------------
+    // Unbranded Boot removes the Windows logo, so without this the machine sits
+    // on black between logon and the frontend's first frame. Runs on its own STA
+    // thread and never blocks the watchdog: a splash that fails is a log line,
+    // not a dead console.
+
+    private static void ShowSplash(Process frontend)
+    {
+        if (!_config.SplashEnabled) return;
+
+        var imagePath = _config.SplashImage;
+        if (string.IsNullOrWhiteSpace(imagePath))
+        {
+            foreach (var candidate in new[]
+            {
+                Path.Combine(DataDir, "splash.png"),
+                Path.Combine(Path.GetDirectoryName(MachineConfigPath)!, "splash.png"),
+            })
+            {
+                if (File.Exists(candidate)) { imagePath = candidate; break; }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath)) return;
+
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                using var image = Image.FromFile(imagePath);
+                using var form = new Form
+                {
+                    FormBorderStyle = FormBorderStyle.None,
+                    WindowState = FormWindowState.Maximized,
+                    BackColor = Color.Black,
+                    BackgroundImage = image,
+                    BackgroundImageLayout = ImageLayout.Zoom,
+                    TopMost = true,
+                    ShowInTaskbar = false,
+                    StartPosition = FormStartPosition.CenterScreen,
+                    Cursor = Cursors.Default,
+                };
+
+                var started = DateTime.UtcNow;
+                var timer = new System.Windows.Forms.Timer { Interval = 400 };
+                timer.Tick += (_, _) =>
+                {
+                    var frontendVisible = false;
+                    try
+                    {
+                        frontend.Refresh();
+                        frontendVisible = !frontend.HasExited && frontend.MainWindowHandle != IntPtr.Zero;
+                    }
+                    catch { /* frontend died; the timeout closes us anyway */ }
+
+                    if (frontendVisible || (DateTime.UtcNow - started).TotalSeconds >= _config.SplashSeconds)
+                    {
+                        timer.Stop();
+                        form.Close();
+                    }
+                };
+                timer.Start();
+
+                Cursor.Hide();
+                Application.Run(form);
+                Cursor.Show();
+            }
+            catch (Exception ex)
+            {
+                Log($"splash failed (ignored): {ex.Message}");
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "consolize-splash",
+        };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
     }
 
     // ----- desktop on demand ------------------------------------------------

@@ -92,6 +92,28 @@ CPU-attached x16 slot) outweigh every registry tweak on this list combined, and
 the biggest software win by far is the Defender and startup work, not scheduler
 constants.
 
+## Branding the boot
+
+Three separate images show up between the power button and the game, owned by
+three different layers:
+
+1. **Firmware logo** (motherboard or laptop vendor). Replaceable only through
+   the vendor's own BIOS tooling, if it has any. Not scriptable.
+2. **Windows boot logo**, drawn from the UEFI BGRT table. `boot-silent.ps1`
+   removes it. Replacing it instead of removing it means [HackBGRT], which is an
+   EFI application, so it needs Secure Boot off or a signed shim. Consider that
+   a deliberate trade, not a default.
+3. **The gap between logon and the frontend's first frame**, which is ours. The
+   session manager shows a fullscreen splash there, closing as soon as the
+   frontend puts a window on screen or after `SplashSeconds`. Drop a
+   `splash.png` next to the config (`%ProgramData%\Consolize\` or
+   `%LOCALAPPDATA%\Consolize\`) and it is picked up automatically.
+
+Layer 3 is where a project logo belongs: no Secure Boot trade, no firmware
+dependency, and it covers exactly the seconds that would otherwise be black.
+
+[HackBGRT]: https://github.com/Metabolix/HackBGRT
+
 ## Non-goals
 
 - Firmware/OEM boot logo replacement (BIOS territory).

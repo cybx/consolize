@@ -87,7 +87,14 @@ dotnet publish src/Consolize.SessionManager -c Release -r win-x64 -o out/publish
 ./out/publish/consolize.exe send quit
 ```
 
-Config lives at `%LOCALAPPDATA%\Consolize\config.json` (created on first run), logs at `%LOCALAPPDATA%\Consolize\logs\`.
+Config lives at `%LOCALAPPDATA%\Consolize\config.json` (created on first run,
+with `%ProgramData%\Consolize\config.json` as the machine-wide fallback), logs at
+`%LOCALAPPDATA%\Consolize\logs\`.
+
+**Your own boot logo:** drop a `splash.png` next to either config and the
+session manager shows it fullscreen while the frontend starts, closing the
+moment the frontend draws its first window. Since `boot-silent.ps1` removes the
+Windows logo, this is what the machine shows on the way up.
 
 ## Making it the real shell
 
@@ -101,6 +108,7 @@ Config lives at `%LOCALAPPDATA%\Consolize\config.json` (created on first run), l
 ./setup/tune-performance.ps1              # HAGS, MMCSS game profile, reserved storage (add -Aggressive to strip background services)
 ./setup/power-console.ps1                 # power button = rest mode, no password on wake, no core parking
 ./setup/clean-startup.ps1                 # nothing starts with Windows except the console itself (reversible)
+./setup/boot-silent.ps1                   # no Windows logo, no welcome screen, no boot error dialogs
 
 # log into Steam once with "Remember me" before the next step, then:
 ./setup/preflight.ps1 -UserName gamer     # catches the first-boot traps while a desktop is still there
