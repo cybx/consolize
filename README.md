@@ -31,10 +31,10 @@ No `Winlogon\Shell` registry rewrite, no scheduled task launching a VBS that lau
 | Phase | What | Status |
 |---|---|---|
 | F1 | Session manager (watchdog shell + desktop on demand) | **WIP, this repo** |
-| F2 | Quiet layer (Game Bar off, DND, update discipline, autologon via LSA, boot UI) | planned |
+| F2 | Quiet layer (Game Bar off, DND, update discipline, autologon via LSA, boot UI) | **first pass in `setup/`** |
 | F3 | Power: rest mode (sleep/hibernate profile, wake by controller, nightly maintenance window) | planned |
 | F4 | Controller-first quick settings (Bluetooth pairing, audio output, volume, wifi) without touching a desktop | planned |
-| F0 | Provisioning: `autounattend.xml` that installs a ready-to-play machine from first boot | planned |
+| F0 | Provisioning: gaming bootstrap (GPU driver, runtimes, updates) + `autounattend.xml` | **bootstrap in `setup/`**, autounattend pending |
 | F5 | Remote maintenance (OpenSSH, second admin account, clean uninstall) | planned |
 
 ## Quick start (bench testing, no shell replacement)
@@ -56,11 +56,19 @@ Config lives at `%LOCALAPPDATA%\Consolize\config.json` (created on first run), l
 > **Warning:** you are replacing the Windows shell for a user. Do this on a dedicated gamer account, keep a second admin account with the default shell, and read the scripts before running them. Tested target: Windows 11 IoT Enterprise LTSC 2024.
 
 ```powershell
-# as admin, from the repo root
-./setup/install.ps1
+# as admin, from the repo root, on the machine that will become the console
+./setup/bootstrap-gaming.ps1              # drivers (GPU autodetect), VC++ runtimes, DirectX, Steam, updates; interactive with recommended defaults
+./setup/quiet-machine.ps1                 # nothing ever pops over a game, updates at 04:00, quiet boot
+./setup/set-autologon.ps1 -UserName gamer # autologon with the password stored as an LSA secret (never plaintext)
+./setup/install.ps1                       # builds and installs consolize.exe
 ./setup/enable-shell-launcher.ps1 -UserName gamer
+
+# once, inside the gamer session (no admin):
+./setup/quiet-user.ps1                    # guide button goes to Steam, toasts off, tips off
+
 # undo:
 ./setup/disable-shell-launcher.ps1 -UserName gamer
+./setup/set-autologon.ps1 -UserName gamer -Remove
 ```
 
 See [docs/architecture.md](docs/architecture.md) for design decisions and the full roadmap.
