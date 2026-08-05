@@ -17,7 +17,8 @@ param(
     [string]$Ref = 'main',
     [string]$InstallDir = 'C:\Program Files\Consolize',
     [string]$ScriptDir = 'C:\ProgramData\consolize\setup',
-    [switch]$DownloadOnly
+    [switch]$DownloadOnly,
+    [switch]$NoElevate
 )
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
@@ -33,9 +34,33 @@ Write-Host '  consolize installer' -ForegroundColor Cyan
 Write-Host '  turns this PC into a couch gaming console'
 Write-Host ''
 
-if (-not (Test-Admin) -and -not $DownloadOnly) {
-    Write-Warning 'Not running as administrator. Reopen PowerShell as admin and run the one-liner again:'
-    Write-Host '    irm https://raw.githubusercontent.com/cybx/consolize/main/get.ps1 | iex'
+# Everything past this point writes to Program Files, services, the registry and
+# the shell, so elevate rather than failing halfway. Piped through iex there is
+# no script file to re-launch, so the elevated session re-fetches this same
+# script and replays the parameters, base64 encoded to dodge quoting entirely.
+if (-not (Test-Admin) -and -not $DownloadOnly -and -not $NoElevate) {
+    $selfUrl = "https://raw.githubusercontent.com/$Repo/$Ref/get.ps1"
+
+    $replay = foreach ($p in $PSBoundParameters.GetEnumerator()) {
+        if ($p.Value -is [switch]) {
+            if ($p.Value.IsPresent) { "-$($p.Key)" }
+        } else {
+            "-$($p.Key) '$($p.Value -replace "'", "''")'"
+        }
+    }
+
+    $inner = "& ([scriptblock]::Create((Invoke-RestMethod '$selfUrl'))) $($replay -join ' ')"
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
+
+    Write-Host 'Administrator rights are needed (Program Files, services, registry, shell).'
+    Write-Host 'Approve the prompt: the installer continues in a new elevated window.'
+    try {
+        Start-Process powershell -Verb RunAs -ArgumentList `
+            '-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded
+    } catch {
+        Write-Warning 'Elevation was declined. Open PowerShell as administrator and run the one-liner again:'
+        Write-Host "    irm $selfUrl | iex"
+    }
     return
 }
 

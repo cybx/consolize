@@ -39,14 +39,16 @@ No `Winlogon\Shell` registry rewrite, no scheduled task launching a VBS that lau
 
 ## Install
 
-From an **administrator** PowerShell on the machine that will become the console:
+On the machine that will become the console:
 
 ```powershell
 irm https://raw.githubusercontent.com/cybx/consolize/main/get.ps1 | iex
 ```
 
-That installs `consolize.exe` and every setup script, then offers to run the
-provisioning menu. Everything below is the manual/from-source path.
+No need to open PowerShell as administrator: it asks for elevation itself and
+continues in the elevated window. It installs `consolize.exe` and every setup
+script, then offers to run the provisioning menu. Everything below is the
+manual/from-source path.
 
 ## Quick start (bench testing, no shell replacement)
 

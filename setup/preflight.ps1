@@ -88,15 +88,9 @@ confirm Big Picture opens, then re-run.
             } else {
                 Write-Check FAIL 'Steam was never logged in' @'
 No config\loginusers.vdf yet. Open Steam once, log in with "Remember me"
-ticked, then re-run. Otherwise the first boot lands on a login window that a
-controller cannot fill in.
+ticked and clear any Steam Guard code, then re-run. Otherwise the first boot
+lands on a login window that a controller cannot fill in.
 '@
-            }
-
-            # Steam Guard still prompts on a new machine even with remember-me
-            $guard = Join-Path $steam 'config\config.vdf'
-            if ((Test-Path $guard) -and ((Get-Content $guard -Raw) -notmatch 'SteamGuard|MachineID|Tokens')) {
-                Write-Check WARN 'Steam Guard may prompt on first launch' 'Launch Steam once on this machine and clear the code before enabling the shell.'
             }
         }
     }
@@ -149,10 +143,10 @@ $auto = Get-ItemProperty $wl -ErrorAction SilentlyContinue
 if ($auto.AutoAdminLogon -eq '1' -and $auto.DefaultUserName) {
     Write-Check PASS 'Autologon configured' "user: $($auto.DefaultUserName)"
 } else {
-    Write-Check WARN 'Autologon not configured' 'The console will stop at the logon screen. Fix: .\set-autologon.ps1 -UserName ' + $UserName
+    Write-Check WARN 'Autologon not configured' "The console will stop at the logon screen. Fix: .\set-autologon.ps1 -UserName $UserName"
 }
-if ($auto.PSObject.Properties.Name -contains 'DefaultPassword') {
-    Write-Check FAIL 'Password stored in cleartext' 'DefaultPassword is a plaintext registry value. Fix: .\set-autologon.ps1 -UserName ' + $UserName
+if ($auto -and ($auto.PSObject.Properties.Name -contains 'DefaultPassword')) {
+    Write-Check FAIL 'Password stored in cleartext' "DefaultPassword is a plaintext registry value. Fix: .\set-autologon.ps1 -UserName $UserName"
 }
 
 # --- verdict -----------------------------------------------------------------

@@ -216,17 +216,17 @@ foreach ($key in $selected) {
         }
 
         'frontends' {
-            $args = @{}
-            if ($Preset -eq 'all') { $args['Install'] = 'all'; $args['BootInto'] = 'steam' }
-            elseif ($Preset -eq 'minimal') { $args['Install'] = 'steam'; $args['BootInto'] = 'steam' }
-            if ($ForUser) { $args['ForUser'] = $ForUser }
-            & (Join-Path $PSScriptRoot 'install-frontend.ps1') @args
+            $splat = @{}
+            if ($Preset -eq 'all') { $splat['Install'] = 'all'; $splat['BootInto'] = 'steam' }
+            elseif ($Preset -eq 'minimal') { $splat['Install'] = 'steam'; $splat['BootInto'] = 'steam' }
+            if ($ForUser) { $splat['ForUser'] = $ForUser }
+            & (Join-Path $PSScriptRoot 'install-frontend.ps1') @splat
         }
 
         'torrent' {
-            $args = @{}
-            if ($ForUser) { $args['ForUser'] = $ForUser }
-            & (Join-Path $PSScriptRoot 'install-torrent.ps1') @args
+            $splat = @{}
+            if ($ForUser) { $splat['ForUser'] = $ForUser }
+            & (Join-Path $PSScriptRoot 'install-torrent.ps1') @splat
         }
 
         'gpu' {
