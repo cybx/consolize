@@ -134,12 +134,19 @@ if ($exeSource) {
 Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host ''
-Write-Host 'Done. Next:' -ForegroundColor Green
-Write-Host "    cd '$ScriptDir'"
-Write-Host '    .\bootstrap-gaming.ps1        # drivers, runtimes, Steam, updates, Defender'
-Write-Host '    .\quiet-machine.ps1           # nothing pops over a game, updates at 04:00'
-Write-Host '    .\set-autologon.ps1 -UserName gamer'
-Write-Host '    .\enable-shell-launcher.ps1 -UserName gamer'
+Write-Host 'Installed.' -ForegroundColor Green
 Write-Host ''
-$run = Read-Host 'Run bootstrap-gaming.ps1 now? [y/N]'
-if ($run -match '^[yYsS]') { & (Join-Path $ScriptDir 'bootstrap-gaming.ps1') }
+Write-Host 'setup-console.ps1 runs the whole thing: apps, runtimes, quiet layer,'
+Write-Host 'power, startup, performance, the console account and the shell. It asks'
+Write-Host 'before each part, and every step is also runnable on its own from'
+Write-Host "$ScriptDir."
+Write-Host ''
+$run = Read-Host 'Run the full console setup now? [Y/n]'
+if ($run -notmatch '^[nN]') {
+    & (Join-Path $ScriptDir 'setup-console.ps1')
+} else {
+    Write-Host ''
+    Write-Host 'When you are ready:'
+    Write-Host "    cd '$ScriptDir'"
+    Write-Host '    .\setup-console.ps1'
+}

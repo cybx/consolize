@@ -46,6 +46,11 @@ internal static class Program
     private static readonly string LogDir = Path.Combine(DataDir, "logs");
     private static readonly string ConfigPath = Path.Combine(DataDir, "config.json");
 
+    /// <summary>Machine-wide fallback, so provisioning can set the frontend before
+    /// the console account has ever logged in (and thus has no profile yet).</summary>
+    private static readonly string MachineConfigPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Consolize", "config.json");
+
     private static readonly object Sync = new();
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -119,13 +124,29 @@ internal static class Program
 
     private static AppConfig LoadOrCreateConfig()
     {
+        // User config wins; machine config is what provisioning writes.
+        foreach (var path in new[] { ConfigPath, MachineConfigPath })
+        {
+            try
+            {
+                if (!File.Exists(path)) continue;
+                var loaded = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(path), JsonOpts);
+                if (loaded is null) continue;
+                Log($"config loaded from {path}");
+                return loaded;
+            }
+            catch (Exception ex)
+            {
+                Log($"could not read config at {path}: {ex.Message}");
+            }
+        }
+
         try
         {
-            if (File.Exists(ConfigPath))
-                return JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(ConfigPath), JsonOpts) ?? new AppConfig();
-
             var config = new AppConfig();
+            Directory.CreateDirectory(DataDir);
             File.WriteAllText(ConfigPath, JsonSerializer.Serialize(config, JsonOpts));
+            Log($"default config written to {ConfigPath}");
             return config;
         }
         catch (Exception ex)

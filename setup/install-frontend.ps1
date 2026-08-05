@@ -18,7 +18,8 @@ Installs the game launchers you want and picks which one consolize boots into.
 param(
     [ValidateSet('steam', 'playnite', 'hydra', 'all')] [string[]]$Install,
     [ValidateSet('steam', 'playnite', 'hydra')] [string]$BootInto,
-    [string]$ForUser
+    [string]$ForUser,
+    [switch]$Machine
 )
 $ErrorActionPreference = 'Stop'
 
@@ -29,10 +30,18 @@ $catalog = [ordered]@{
 }
 
 function Get-ConfigPath {
+    # Machine-wide is the safe target during provisioning: the console account
+    # may not have a profile yet, and pre-creating folders under C:\Users\<name>
+    # can make Windows build the real profile somewhere else on first logon.
+    if ($Machine) { return Join-Path $env:ProgramData 'Consolize\config.json' }
+
     if ($ForUser) {
         $profileDir = (Get-CimInstance Win32_UserProfile |
             Where-Object { $_.LocalPath -like "*\$ForUser" } | Select-Object -First 1).LocalPath
-        if (-not $profileDir) { $profileDir = Join-Path $env:SystemDrive "Users\$ForUser" }
+        if (-not $profileDir) {
+            Write-Warning "$ForUser has no profile yet, writing the machine-wide config instead."
+            return Join-Path $env:ProgramData 'Consolize\config.json'
+        }
         return Join-Path $profileDir 'AppData\Local\Consolize\config.json'
     }
     return Join-Path $env:LOCALAPPDATA 'Consolize\config.json'

@@ -46,9 +46,26 @@ irm https://raw.githubusercontent.com/cybx/consolize/main/get.ps1 | iex
 ```
 
 No need to open PowerShell as administrator: it asks for elevation itself and
-continues in the elevated window. It installs `consolize.exe` and every setup
-script, then offers to run the provisioning menu. Everything below is the
-manual/from-source path.
+continues in the elevated window. It installs `consolize.exe` plus every setup
+script and then runs the whole provisioning, asking before each part.
+
+### Two accounts, and why
+
+The account Windows was installed with keeps the normal desktop and stays your
+way back in. A second account (`gamer` by default) is the only one whose shell
+gets replaced.
+
+Setup runs in three phases, because Steam keeps its login per Windows user, so
+an administrator cannot sign in on the console account's behalf:
+
+1. **As admin:** apps, runtimes, quiet layer, power, startup, performance,
+   autologon, and a one-shot task for the console account.
+2. **As the console account:** log in once. A window opens by itself, applies
+   the per-user settings and Steam so you can sign in with "Remember me".
+3. **As admin again:** `.\setup-console.ps1 -EnableShell`, which preflights and
+   only then replaces the shell.
+
+Everything below is the manual/from-source path; each script also works alone.
 
 ## Quick start (bench testing, no shell replacement)
 
