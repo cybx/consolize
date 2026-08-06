@@ -91,6 +91,44 @@ foreach ($file in $scripts) {
         }
     }
 
+    # The same trap one scope down. This only looked at the script's own param
+    # block, so a function taking [int[]]$Accent and assigning a local $accent
+    # went unreported, and the artwork silently stopped being drawn.
+    $functions = $ast.FindAll({
+        param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst]
+    }, $true)
+
+    foreach ($function in $functions) {
+        $declared = if ($function.Parameters) { $function.Parameters }
+                    elseif ($function.Body.ParamBlock) { $function.Body.ParamBlock.Parameters }
+                    else { $null }
+        if (-not $declared) { continue }
+
+        $localNames = @($declared | ForEach-Object {
+            [pscustomobject]@{
+                Name = $_.Name.VariablePath.UserPath
+                HasType = [bool]($_.Attributes | Where-Object { $_ -is [System.Management.Automation.Language.TypeConstraintAst] })
+            }
+        })
+
+        $localAssignments = $function.Body.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+            $node.Left -is [System.Management.Automation.Language.VariableExpressionAst]
+        }, $true)
+
+        foreach ($assignment in $localAssignments) {
+            $target = $assignment.Left.VariablePath.UserPath
+            $match = $localNames | Where-Object { $_.Name -ieq $target } | Select-Object -First 1
+            if (-not $match) { continue }
+            if ($match.Name -cne $target -or $assignment.Right.Extent.Text -match '^\s*(\[ordered\])?@\{') {
+                Report $file.FullName $assignment.Extent.StartLineNumber 'param-collision' `
+                    ("`$$target collides with $($function.Name)'s parameter `$$($match.Name)" +
+                     $(if ($match.HasType) { ' (typed, so the value is silently coerced)' } else { '' }))
+            }
+        }
+    }
+
     # --- 3. bare + concatenation inside a command call -----------------------
     $commands = $ast.FindAll({
         param($node) $node -is [System.Management.Automation.Language.CommandAst]

@@ -39,11 +39,12 @@ $vdf = Join-Path $fakeSteam 'userdata\7777777\config\shortcuts.vdf'
 # the code under test, so a shared misunderstanding cannot pass both
 function Parse-Vdf {
     param([byte[]]$B)
-    $p = 0; $depth = 1; $out = @(); $cur = $null
+    $p = 0; $depth = 1; $out = @(); $cur = $null; $inTags = $false
     while ($p -lt $B.Length) {
         $t = $B[$p]; $p++
         if ($t -eq 8) {
             $depth--
+            if ($depth -eq 3) { $inTags = $false }
             if ($depth -eq 2 -and $cur) { $out += ,$cur; $cur = $null }
             if ($depth -lt 0) { throw "underflow at $p" }
             if ($depth -eq 0 -and $p -ne $B.Length) { throw "root closed at $p of $($B.Length)" }
@@ -51,10 +52,15 @@ function Parse-Vdf {
         }
         $s = $p; while ($B[$p] -ne 0) { $p++ }
         $k = [Text.Encoding]::UTF8.GetString($B, $s, $p - $s); $p++
-        if ($t -eq 0) { if ($depth -eq 2) { $cur = @{ Index = $k } }; $depth++ }
+        if ($t -eq 0) {
+            if ($depth -eq 2) { $cur = @{ Index = $k; Tags = @() } }
+            if ($depth -eq 3 -and $k -eq 'tags') { $inTags = $true }
+            $depth++
+        }
         elseif ($t -eq 1) { $s = $p; while ($B[$p] -ne 0) { $p++ }
             $v = [Text.Encoding]::UTF8.GetString($B, $s, $p - $s); $p++
-            if ($cur -and $depth -eq 3) { $cur[$k] = $v } }
+            if ($cur -and $depth -eq 4 -and $inTags) { $cur.Tags += $v }
+            elseif ($cur -and $depth -eq 3) { $cur[$k] = $v } }
         elseif ($t -eq 2) { if ($cur -and $depth -eq 3) { $cur[$k] = [BitConverter]::ToInt32($B, $p) }; $p += 4 }
         else { throw "bad type $t at $($p-1)" }
     }
@@ -102,6 +108,29 @@ Check 'every entry has an appid' (($got | Where-Object { $_.appid }).Count -eq 3
 Check 'appids are distinct' ((($got.appid | Select-Object -Unique).Count) -eq 3) "$($got.appid -join ', ')"
 Check 'appids have the top bit set' (($got.appid | Where-Object { $_ -lt 0 }).Count -eq 3) "$($got.appid -join ', ')"
 
+Write-Host "`n2b. the artwork and the collection"
+# Asserted, not merely attempted: the script warns and carries on when drawing
+# fails, which is right at run time and useless in a test. A run where every
+# image failed still printed "artwork written".
+$grid = Join-Path $fakeSteam 'userdata\7777777\config\grid'
+Add-Type -AssemblyName System.Drawing
+foreach ($e in $got) {
+    $u = [BitConverter]::ToUInt32([BitConverter]::GetBytes([int]$e.appid), 0)
+    foreach ($suffix in @('p.png', '.png', '_hero.png', '_logo.png')) {
+        $img = Join-Path $grid "$u$suffix"
+        if (-not (Test-Path $img)) { Check "$($e.AppName) $suffix exists" $false 'missing'; continue }
+        try {
+            $bitmap = [System.Drawing.Image]::FromFile($img)
+            $size = "$($bitmap.Width)x$($bitmap.Height)"; $bitmap.Dispose()
+            Check "$($e.AppName) $suffix is a real image ($size)" $true ''
+        } catch { Check "$($e.AppName) $suffix is a real image" $false $_.Exception.Message }
+    }
+}
+Check 'artwork is named after the unsigned appid' (
+    (Get-ChildItem $grid -Filter '*.png').Count -eq 12) "$((Get-ChildItem $grid -Filter '*.png').Count) files"
+Check 'every entry is tagged Consolize' (
+    ($got | Where-Object { $_.Tags -contains 'Consolize' }).Count -eq 3) "$(($got | ForEach-Object { $_.Tags -join '/' }) -join ' | ')"
+
 Write-Host "`n3. a library that already has games, appended to"
 [IO.File]::WriteAllBytes($vdf, (Build-SteamFile @('Cyberpunk', 'Elden Ring')))
 & $script -ConsolizeExe $exe -Force | Out-Null
@@ -142,6 +171,23 @@ $garbage = [byte[]](0, 5, 99, 0, 3, 200, 77)
 & $script -ConsolizeExe $exe -Force -WarningAction SilentlyContinue | Out-Null
 $after = [IO.File]::ReadAllBytes($vdf)
 Check 'bytes unchanged' (-not (Compare-Object $garbage $after)) 'the file was modified'
+
+Write-Host "`n8. our own entries with a stale appid are replaced, not duplicated"
+# The id changed once already, when the formula was corrected. When it does, the
+# artwork is filed under a number nothing looks up, so the entry has to be
+# rewritten rather than recognised by name and left alone.
+[IO.File]::WriteAllBytes($vdf, (Build-SteamFile @('Cyberpunk', 'Desktop Mode', 'Quick Settings', 'Update consolize')))
+Remove-Item "$vdf.consolize-backup" -Force -ErrorAction SilentlyContinue
+& $script -ConsolizeExe $exe -Force | Out-Null
+$got = Parse-Vdf ([IO.File]::ReadAllBytes($vdf))
+$desktop = @($got | Where-Object { $_.AppName -eq 'Desktop Mode' })
+Check '4 entries, not 7' ($got.Count -eq 4) "got $($got.Count): $($got.AppName -join ', ')"
+Check 'the game survived' ($got.AppName -contains 'Cyberpunk') "$($got.AppName -join ', ')"
+Check 'exactly one Desktop Mode' ($desktop.Count -eq 1) "got $($desktop.Count)"
+Check 'the stale appid is gone' ($desktop[0].appid -ne -1234) "still $($desktop[0].appid)"
+Check 'the replacement is tagged' ($desktop[0].Tags -contains 'Consolize') "$($desktop[0].Tags -join '/')"
+$img = Join-Path $grid ("{0}p.png" -f [BitConverter]::ToUInt32([BitConverter]::GetBytes([int]$desktop[0].appid), 0))
+Check 'artwork matches the new appid' (Test-Path $img) "no $([IO.Path]::GetFileName($img))"
 
 Write-Host ''
 if ($fail) { Write-Host "$fail check(s) failed" -ForegroundColor Red; exit 1 }

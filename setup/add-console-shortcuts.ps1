@@ -8,9 +8,13 @@ switching between the two never needs a keyboard.
   In the tray           : the session manager shows an icon while the desktop is
                          up (double-click returns to the console)
 
+The three entries carry cover art drawn here and land in a collection of their
+own, "Consolize", so they sit together instead of scattered among the games.
+
 Steam keeps non-Steam shortcuts per Steam account in a binary VDF, and rewrites
 that file from memory when it closes, so Steam has to be closed while we write.
-The existing file is backed up next to itself first.
+The existing file is backed up next to itself first. The artwork is separate
+files that Steam reads off disk, so that part needs nothing closed.
 
 Runs as the console account (its own Steam profile), no admin needed.
 
@@ -19,6 +23,8 @@ Runs as the console account (its own Steam profile), no admin needed.
 #>
 param(
     [string]$ConsolizeExe = 'C:\Program Files\Consolize\consolize.exe',
+    # The collection these end up in. Empty to leave them loose in the library.
+    [string[]]$Collection = @('Consolize'),
     [switch]$Force
 )
 $ErrorActionPreference = 'Stop'
@@ -102,9 +108,11 @@ function Read-ShortcutsVdf {
     param([byte[]]$Bytes)
 
     $names = New-Object System.Collections.Generic.List[string]
+    $entries = New-Object System.Collections.Generic.List[object]
     $maxIndex = -1
     $pos = 0
     $depth = 1   # the root map is open before the first byte
+    $current = $null
 
     while ($pos -lt $Bytes.Length) {
         $type = $Bytes[$pos]; $pos++
@@ -112,6 +120,11 @@ function Read-ShortcutsVdf {
         if ($type -eq 8) {
             $depth--
             if ($depth -lt 0) { throw "a closing byte at $($pos - 1) with no map open" }
+            if ($depth -eq 2 -and $current) {
+                # the byte that just closed this entry is its last one
+                $current.End = $pos - 1
+                $entries.Add($current); $current = $null
+            }
             if ($depth -eq 0 -and $pos -ne $Bytes.Length) {
                 throw "the document closes at byte $pos but the file is $($Bytes.Length) bytes"
             }
@@ -129,6 +142,12 @@ function Read-ShortcutsVdf {
                 if ($depth -eq 2) {
                     $parsed = 0
                     if ([int]::TryParse($key, [ref]$parsed) -and $parsed -gt $maxIndex) { $maxIndex = $parsed }
+                    # the type byte, not the key: the entry's bytes start there,
+                    # which is what lets one be copied over or dropped whole
+                    $current = [pscustomobject]@{
+                        Index = $key; Name = $null; AppId = $null
+                        Start = $keyStart - 1; End = -1
+                    }
                 }
                 $depth++
             }
@@ -137,10 +156,16 @@ function Read-ShortcutsVdf {
                 while ($pos -lt $Bytes.Length -and $Bytes[$pos] -ne 0) { $pos++ }
                 if ($pos -ge $Bytes.Length) { throw "the value of '$key' runs past the end of the file" }
                 $value = [Text.Encoding]::UTF8.GetString($Bytes, $valStart, $pos - $valStart); $pos++
-                if ($key -eq 'AppName' -and $depth -eq 3) { $names.Add($value) }
+                if ($key -eq 'AppName' -and $depth -eq 3) {
+                    $names.Add($value)
+                    if ($current) { $current.Name = $value }
+                }
             }
             2 {
                 if ($pos + 4 -gt $Bytes.Length) { throw "the value of '$key' runs past the end of the file" }
+                if ($key -eq 'appid' -and $depth -eq 3 -and $current) {
+                    $current.AppId = [BitConverter]::ToInt32($Bytes, $pos)
+                }
                 $pos += 4
             }
             default { throw "unknown field type 0x$('{0:X2}' -f $type) at byte $($pos - 1)" }
@@ -148,13 +173,20 @@ function Read-ShortcutsVdf {
     }
 
     if ($depth -ne 0) { throw "the file ends with $depth map(s) still open" }
-    return [pscustomobject]@{ Names = $names; MaxIndex = $maxIndex }
+    return [pscustomobject]@{ Names = $names; Entries = $entries; MaxIndex = $maxIndex }
 }
 
-# Steam's id for a non-Steam shortcut: CRC-32 of Exe+AppName with the top bit
-# set. Steam derives one itself when the field is absent, but writing it keeps
-# the id stable across rewrites, and artwork and steam://rungameid links are
-# keyed on it.
+# Steam's id for a non-Steam shortcut, per Valve's own documentation: CRC-32 of
+# AppName + Exe + a trailing NUL, encoded Windows-1252, with the top bit set.
+#
+# Three details that all look like noise and are not. The order is name then
+# exe, not the other way round. The NUL is part of the input. And the encoding
+# is Windows-1252, not UTF-8, which only diverges once a name carries an accent,
+# which is exactly when a Brazilian machine would find out.
+#
+# Steam invents an id when the field is absent, and an invented id is a
+# different number every rewrite, so artwork filed under the old one stops being
+# found. Writing it is what keeps the artwork attached.
 function Get-ShortcutAppId {
     param([string]$Exe, [string]$AppName)
     # The L suffixes are not decoration. PowerShell reads an eight digit hex
@@ -162,7 +194,7 @@ function Get-ShortcutAppId {
     # 0x80000000 is Int32 -2147483648. Without the suffix this starts at -1,
     # every shift is arithmetic on a negative number, and the result is not a
     # CRC at all. Checked against the standard vector: "123456789" -> 0xCBF43926.
-    $bytes = [Text.Encoding]::UTF8.GetBytes($Exe + $AppName)
+    $bytes = [Text.Encoding]::GetEncoding(1252).GetBytes($AppName + $Exe + "`0")
     $crc = 0xFFFFFFFFL
     foreach ($b in $bytes) {
         $crc = $crc -bxor [int64]$b
@@ -175,16 +207,148 @@ function Get-ShortcutAppId {
     return [BitConverter]::ToInt32([BitConverter]::GetBytes([uint32]$crc), 0)
 }
 
+$powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$updateScript = Join-Path $PSScriptRoot 'update-console.ps1'
+
+# Glyphs come from Segoe MDL2 Assets, which ships with Windows 10 and 11, so
+# the artwork needs no files of its own and cannot arrive half installed.
+$entries = @(
+    @{ Name = 'Quick Settings'; Exe = $ConsolizeExe; Args = 'panel'
+       Glyph = [char]0xE713; Accent = @(96, 190, 255) }
+    @{ Name = 'Desktop Mode';   Exe = $ConsolizeExe; Args = 'send desktop'
+       Glyph = [char]0xE7F4; Accent = @(150, 220, 140) }
+    @{ Name = 'Update consolize'; Exe = $powershell
+       Args = "-NoProfile -ExecutionPolicy Bypass -File `"$updateScript`""
+       Glyph = [char]0xE777; Accent = @(232, 180, 100) }
+)
+
+# Steam looks for artwork in config\grid, named after the shortcut's appid in
+# its unsigned form. The appid stored in the file is a signed 32 bit integer and
+# ours are all negative, so the two never look alike: -1680150366 on one side,
+# 2614816930 on the other. Get that wrong and the files sit there being ignored.
+#
+#   <appid>p.png      600x900   the portrait capsule, the one the library grid shows
+#   <appid>.png       920x430   the landscape capsule, used in lists and Big Picture
+#   <appid>_hero.png  1920x620  the banner across the top of the game's page
+#   <appid>_logo.png            drawn over the hero, so it has to be transparent
+function Write-ShortcutArtwork {
+    param([string]$GridDir, [int]$AppId, [string]$Name, [char]$Glyph, [int[]]$Accent)
+
+    Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+    $unsigned = [BitConverter]::ToUInt32([BitConverter]::GetBytes($AppId), 0)
+    $accentColor = [System.Drawing.Color]::FromArgb($Accent[0], $Accent[1], $Accent[2])
+
+    function New-Art {
+        param([int]$W, [int]$H, [string]$Path, [bool]$Transparent, [double]$GlyphScale)
+        $bmp = New-Object System.Drawing.Bitmap($W, $H)
+        $g = [System.Drawing.Graphics]::FromImage($bmp)
+        try {
+            $g.SmoothingMode = 'AntiAlias'
+            $g.TextRenderingHint = 'ClearTypeGridFit'
+            $g.InterpolationMode = 'HighQualityBicubic'
+
+            if (-not $Transparent) {
+                $rect = New-Object System.Drawing.Rectangle(0, 0, $W, $H)
+                $top = [System.Drawing.Color]::FromArgb(20, 24, 34)
+                $bottom = [System.Drawing.Color]::FromArgb(9, 11, 16)
+                $bg = New-Object System.Drawing.Drawing2D.LinearGradientBrush($rect, $top, $bottom, 90)
+                $g.FillRectangle($bg, $rect); $bg.Dispose()
+
+                # a wash of the accent behind the glyph, so the three entries are
+                # told apart at a glance in a grid of cover art
+                $glow = New-Object System.Drawing.SolidBrush(
+                    [System.Drawing.Color]::FromArgb(26, $accentColor.R, $accentColor.G, $accentColor.B))
+                $r = [int]($H * 0.55)
+                $g.FillEllipse($glow, [int]($W / 2 - $r), [int]($H * 0.30 - $r), $r * 2, $r * 2)
+                $glow.Dispose()
+            }
+
+            $centre = New-Object System.Drawing.StringFormat
+            $centre.Alignment = 'Center'; $centre.LineAlignment = 'Center'
+
+            if (-not $Transparent) {
+                $glyphFont = New-Object System.Drawing.Font('Segoe MDL2 Assets', [single]($H * $GlyphScale), 'Regular', 'Pixel')
+                $glyphBrush = New-Object System.Drawing.SolidBrush($accentColor)
+                $g.DrawString([string]$Glyph, $glyphFont, $glyphBrush,
+                    (New-Object System.Drawing.RectangleF(0, [single]($H * 0.06), $W, [single]($H * 0.46))), $centre)
+                $glyphFont.Dispose(); $glyphBrush.Dispose()
+            }
+
+            # The logo is drawn over the hero rather than beside it, so with no
+            # background to sit on its text moves up to fill the space the glyph
+            # would have taken.
+            $nameTop = if ($Transparent) { 0.20 } else { 0.58 }
+            $markTop = if ($Transparent) { 0.58 } else { 0.82 }
+
+            $nameFont = New-Object System.Drawing.Font('Segoe UI', [single]($H * 0.075), 'Regular', 'Pixel')
+            $white = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(238, 243, 252))
+            $g.DrawString($Name, $nameFont, $white,
+                (New-Object System.Drawing.RectangleF(
+                    [single]($W * 0.05), [single]($H * $nameTop),
+                    [single]($W * 0.90), [single]($H * 0.30))), $centre)
+            $nameFont.Dispose(); $white.Dispose()
+
+            $markFont = New-Object System.Drawing.Font('Segoe UI', [single]($H * 0.040), 'Regular', 'Pixel')
+            $muted = New-Object System.Drawing.SolidBrush(
+                [System.Drawing.Color]::FromArgb(190, $accentColor.R, $accentColor.G, $accentColor.B))
+            $g.DrawString('consolize', $markFont, $muted,
+                (New-Object System.Drawing.RectangleF(
+                    0, [single]($H * $markTop), $W, [single]($H * 0.14))), $centre)
+            $markFont.Dispose(); $muted.Dispose()
+            $centre.Dispose()
+
+            $bmp.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+        } finally { $g.Dispose(); $bmp.Dispose() }
+    }
+
+    New-Art 600  900  (Join-Path $GridDir "${unsigned}p.png")     $false 0.30
+    New-Art 920  430  (Join-Path $GridDir "$unsigned.png")        $false 0.34
+    New-Art 1920 620  (Join-Path $GridDir "${unsigned}_hero.png") $false 0.30
+    New-Art 1280 360  (Join-Path $GridDir "${unsigned}_logo.png") $true  0
+}
+
+# Artwork is written whether or not the entries need touching, and without
+# closing Steam: these are plain files read off disk, not state Steam holds in
+# memory. That way a machine set up before this existed picks it up on the next
+# update instead of needing the shortcuts rewritten.
+foreach ($userDir in $userDirs) {
+    $gridDir = Join-Path $userDir.FullName 'config\grid'
+    New-Item -ItemType Directory -Force -Path $gridDir | Out-Null
+    foreach ($entry in $entries) {
+        $appId = Get-ShortcutAppId -Exe "`"$($entry.Exe)`"" -AppName $entry.Name
+        try {
+            Write-ShortcutArtwork -GridDir $gridDir -AppId $appId -Name $entry.Name `
+                -Glyph $entry.Glyph -Accent $entry.Accent
+        } catch {
+            Write-Warning "  could not draw the artwork for '$($entry.Name)': $($_.Exception.Message)"
+        }
+    }
+    Write-Host "  $($userDir.Name): artwork written to config\grid"
+}
+
 # Decide before closing anything. This runs again on every update, and on a
 # machine that is already set up, killing Steam only to find there was nothing
 # to do would throw the player out of whatever they were in the middle of.
+#
+# "Present" is not enough: an entry whose stored appid is not the one computed
+# now has its artwork filed under a number nothing looks up, so it has to be
+# rewritten rather than left alone.
+$wanted = @{}
+foreach ($entry in $entries) {
+    $wanted[$entry.Name] = Get-ShortcutAppId -Exe "`"$($entry.Exe)`"" -AppName $entry.Name
+}
+
 $needsWork = $false
 foreach ($userDir in $userDirs) {
     $vdf = Join-Path $userDir.FullName 'config\shortcuts.vdf'
     if (-not (Test-Path $vdf)) { $needsWork = $true; break }
     try {
         $parsed = Read-ShortcutsVdf -Bytes ([IO.File]::ReadAllBytes($vdf))
-        if ($parsed.Names -notcontains 'Desktop Mode') { $needsWork = $true; break }
+        foreach ($name in $wanted.Keys) {
+            $mine = $parsed.Entries | Where-Object { $_.Name -eq $name } | Select-Object -First 1
+            if (-not $mine -or $mine.AppId -ne $wanted[$name]) { $needsWork = $true; break }
+        }
+        if ($needsWork) { break }
     } catch { $needsWork = $true; break }
 }
 
@@ -213,9 +377,12 @@ foreach ($userDir in $userDirs) {
     New-Item -ItemType Directory -Force -Path $configDir | Out-Null
     $vdf = Join-Path $configDir 'shortcuts.vdf'
 
-    # Appending, not replacing. Steam creates this file on its own, so refusing
-    # whenever it existed meant the entries were almost never written, and the
-    # library came up without a way to reach the desktop.
+    # Steam creates this file on its own, so refusing whenever it existed meant
+    # the entries were almost never written and the library came up without a
+    # way to reach the desktop. What is kept is every entry that is not one of
+    # ours, copied byte for byte: a library belongs to whoever built it, and
+    # reserialising someone else's entries from my own parse would quietly drop
+    # any field this does not know about.
     $keep = $null
     $firstIndex = 0
     $backup = $null
@@ -250,48 +417,39 @@ foreach ($userDir in $userDirs) {
         # Ask the parsed entries, not the raw bytes. The names can be present in
         # a file where Steam cannot reach them, and a substring match would call
         # that done and skip the machine forever.
-        if ($existing.Names -contains 'Desktop Mode') {
-            Write-Host "  $($userDir.Name): already has the Desktop Mode entry, leaving it alone."
+        $current = @($existing.Entries | Where-Object { $wanted.ContainsKey($_.Name) -and $_.AppId -eq $wanted[$_.Name] })
+        if ($current.Count -eq $entries.Count) {
+            Write-Host "  $($userDir.Name): already has the console entries, leaving it alone."
             continue
         }
 
         $backup = "$vdf.consolize-backup"
         if (-not (Test-Path $backup)) { Copy-Item $vdf $backup }
 
+        $keep = @($existing.Entries | Where-Object { -not $wanted.ContainsKey($_.Name) })
+        $stale = $existing.Entries.Count - $keep.Count
+
         # Indexes, not a count: a file with entries 0, 1 and 5 has three of them,
         # and starting at 3 would collide with 5.
         $firstIndex = $existing.MaxIndex + 1
 
-        # Everything except the two closing bytes, so new entries go inside the
-        # shortcuts map. Array.Copy, not $bytes[0..n]: range indexing yields
-        # Object[], which BinaryWriter does not write as bytes, and the existing
-        # shortcuts came out mangled.
-        $keep = New-Object byte[] ($bytes.Length - 2)
-        [Array]::Copy($bytes, $keep, $bytes.Length - 2)
-        Write-Host "  $($userDir.Name): $($existing.Names.Count) shortcut(s) already there, adding to them (backup: $(Split-Path $backup -Leaf))"
+        $note = "  $($userDir.Name): $($keep.Count) shortcut(s) of yours kept"
+        if ($stale) { $note += ", $stale stale console entr$(if ($stale -eq 1) { 'y' } else { 'ies' }) replaced" }
+        Write-Host "$note (backup: $(Split-Path $backup -Leaf))"
     }
-
-    $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $updateScript = Join-Path $PSScriptRoot 'update-console.ps1'
-
-    $entries = @(
-        @{ Name = 'Quick Settings'; Exe = $ConsolizeExe; Args = 'panel' }
-        @{ Name = 'Desktop Mode';   Exe = $ConsolizeExe; Args = 'send desktop' }
-        @{ Name = 'Update consolize'; Exe = $powershell
-           Args = "-NoProfile -ExecutionPolicy Bypass -File `"$updateScript`"" }
-    )
 
     # Built in memory and checked before it replaces anything on disk. The file
     # being written here is someone's library.
     $stream = New-Object System.IO.MemoryStream
     $w = New-Object System.IO.BinaryWriter($stream)
     try {
-        if ($keep) {
-            # everything that was there, minus its closing byte
-            $w.Write($keep)
-        } else {
-            $w.Write([byte]0)
-            $w.Write([Text.Encoding]::UTF8.GetBytes('shortcuts')); $w.Write([byte]0)
+        $w.Write([byte]0)
+        $w.Write([Text.Encoding]::UTF8.GetBytes('shortcuts')); $w.Write([byte]0)
+
+        # Verbatim, index key included, so nothing of theirs is renumbered and
+        # nothing of theirs is reinterpreted.
+        foreach ($kept in $keep) {
+            $w.Write($bytes, $kept.Start, $kept.End - $kept.Start + 1)
         }
 
         for ($i = 0; $i -lt $entries.Count; $i++) {
@@ -301,6 +459,8 @@ foreach ($userDir in $userDirs) {
             $w.Write([byte]0)
             $w.Write([Text.Encoding]::UTF8.GetBytes("$index")); $w.Write([byte]0)
 
+            # Same call as the artwork uses, so the id in the file and the names
+            # of the image files can never drift apart.
             Add-VdfInt $w 'appid' (Get-ShortcutAppId -Exe "`"$($entry.Exe)`"" -AppName $entry.Name)
             Add-VdfString $w 'AppName' $entry.Name
             Add-VdfString $w 'Exe' "`"$($entry.Exe)`""
@@ -319,9 +479,16 @@ foreach ($userDir in $userDirs) {
             Add-VdfInt $w 'LastPlayTime' 0
             Add-VdfString $w 'FlatpakAppID' ''
 
-            # empty tags map
+            # The tags map is what Steam reads as the shortcut's categories, and
+            # a category is what the library shows as a collection. Keys are the
+            # position in the list, values are the names. One tag, so the three
+            # entries land together under "Consolize" instead of loose among the
+            # games.
             $w.Write([byte]0)
             $w.Write([Text.Encoding]::UTF8.GetBytes('tags')); $w.Write([byte]0)
+            for ($t = 0; $t -lt $Collection.Count; $t++) {
+                Add-VdfString $w "$t" $Collection[$t]
+            }
             $w.Write([byte]8)
 
             $w.Write([byte]8)   # close this entry
