@@ -22,7 +22,7 @@ jobs:
   scripts:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Static checks over every PowerShell script
         shell: pwsh
@@ -46,11 +46,11 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '10.0.100'
 
       # The release workflow publishes this same project. Building it here means
       # a change that does not compile is caught on the commit rather than on
