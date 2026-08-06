@@ -350,7 +350,6 @@ if ($bootInto -ne 'steam') {
     Write-Host '==> Steam login for this account' -ForegroundColor Cyan
     if (Test-SteamLogin $steam) {
         Write-Host '  already signed in on this account.'
-        $script:loginConfirmed = $true
     } else {
         Write-Host '  Steam keeps its login per Windows user, so this account needs its own.'
         Write-Host '  Two-factor and the QR code are both fine: Steam Guard asks once per'
@@ -384,11 +383,17 @@ if ($bootInto -ne 'steam') {
             Start-Sleep -Seconds 3
             $waited += 3
         }
+    }
 
+    if (-not (Test-SteamLogin $steam)) {
+        Write-Warning '  No saved Steam login was detected, so Big Picture cannot be trusted to open unattended.'
+    } else {
         # Heuristics can be wrong; the real acceptance test is whether Big
-        # Picture comes up. Restart Steam rather than switching modes in the
-        # running client: one that just authenticated is usually still updating
-        # or restarting itself, and -bigpicture on top of that does nothing.
+        # Picture comes up. This must run even when the login was already saved:
+        # a cached credential proves authentication, not that the frontend can
+        # render. Restart Steam rather than switching modes in the running
+        # client: one that just authenticated may still be updating or restarting
+        # itself, and -bigpicture on top of that does nothing.
         $bigPictureOk = $false
         $attempt = 0
         while ($true) {
