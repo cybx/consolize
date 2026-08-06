@@ -36,6 +36,16 @@ $settings = @(
     @{ Path = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI\BootAnimation'; Name = 'DisableStartupSound'; Value = 1
        Note = 'Startup sound off' }
 
+    # Windows Backup is present even on some IoT Enterprise LTSC 2024 images.
+    # The first value is the supported Windows 11 policy; the second suppresses
+    # the older automatic "configure backup" notifications. Do not remove
+    # MicrosoftWindows.Client.CBS: Backup shares that system package with other
+    # Windows shell experiences.
+    @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\SettingSync'; Name = 'EnableWindowsBackup'; Value = 0
+       Note = 'Windows Backup off (including the periodic organization backup)' }
+    @{ Path = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsBackup'; Name = 'DisableMonitoring'; Value = 1
+       Note = 'Windows Backup setup reminders off' }
+
     @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU'; Name = 'AUOptions'; Value = 4
        Note = 'Windows Update: download + install in the 04:00 window, never auto-reboot under a session' }
     @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU'; Name = 'ScheduledInstallDay'; Value = 0 }
