@@ -21,7 +21,9 @@ Items:
              Note: DirectX 11 and 12 themselves are part of Windows and come
              from Windows Update. There is no separate DX11/DX12 installer;
              what games actually miss are the helper libraries above.
-  frontends  Steam, Playnite and/or Hydra, and which one the console boots into
+  frontends  Steam, Playnite and/or Hydra, and which one the console boots into.
+             Installed first on purpose: Steam then updates itself in the
+             background while everything below is still downloading.
   media      VLC and mpv. Games ship their own video decoders, so codecs barely
              matter for playing; they matter when the console doubles as the
              living room media box. Windows has no HEVC or AV1 decoder out of
@@ -183,8 +185,16 @@ if (-not $selected) {
 
 if (-not $selected -or $selected.Count -eq 0) { Write-Host 'Nothing selected, bye.'; return }
 
-# order matters: Defender exclusions need the game folders to already exist
-$order = @('updates', 'gpu', 'runtimes', 'frontends', 'media', 'tools', 'torrent', 'defender')
+# Order matters, at both ends.
+#
+# frontends first: installing Steam takes seconds, and the client then spends
+# minutes updating itself on first run. Starting that now means it downloads
+# while Windows updates, drivers and runtimes install, rather than stalling the
+# console account's session later, with someone watching a still screen.
+#
+# defender last: its exclusions cover the game folders, which do not exist until
+# the installs above have run.
+$order = @('frontends', 'updates', 'gpu', 'runtimes', 'media', 'tools', 'torrent', 'defender')
 $selected = $order | Where-Object { $selected -contains $_ }
 
 Write-Host ''
@@ -270,6 +280,26 @@ foreach ($key in $selected) {
             if ($NonInteractive) { $splat['Machine'] = $true }
             if ($ForUser) { $splat['ForUser'] = $ForUser }
             & (Join-Path $PSScriptRoot 'install-frontend.ps1') @splat
+
+            # A freshly installed Steam downloads a sizeable self-update the
+            # first time it runs. Start it to the tray now so that download
+            # overlaps with the installs still to come, instead of stalling the
+            # console account's session later, which is when someone is watching.
+            #
+            # Elevated is fine here: Steam's installer grants BUILTIN\Users
+            # FullControl on its directory, inherited by everything created in
+            # it, precisely so ordinary accounts can update the client. Checked,
+            # rather than assumed.
+            $steamExe = @(
+                (Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam' -Name InstallPath -ErrorAction SilentlyContinue).InstallPath,
+                'C:\Program Files (x86)\Steam'
+            ) | Where-Object { $_ } | ForEach-Object { Join-Path ($_ -replace '/', '\') 'steam.exe' } |
+                Where-Object { Test-Path $_ } | Select-Object -First 1
+
+            if ($steamExe -and -not (Get-Process steam -ErrorAction SilentlyContinue)) {
+                Write-Host '>> Warming Steam up (its first-run update downloads in the background)...' -ForegroundColor Cyan
+                try { Start-Process $steamExe -ArgumentList '-silent' } catch { Write-Warning "  could not start it: $($_.Exception.Message)" }
+            }
         }
 
         'torrent' {

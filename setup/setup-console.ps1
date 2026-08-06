@@ -452,6 +452,17 @@ if ($a.Autologon) {
     }
 }
 
+# The warm-up Steam from the install step has had the whole of phase 1 to pull
+# its update. Close it before the reboot: it must not be running, and must not
+# be this session's, when the console account signs in.
+$warm = Get-Process steam, steamwebhelper -ErrorAction SilentlyContinue
+if ($warm) {
+    Step 'Closing the warm-up Steam'
+    $warm | Stop-Process -Force -ErrorAction SilentlyContinue
+    Write-Host '  its client update is already downloaded and shared, so the console'
+    Write-Host '  account starts an up-to-date client instead of waiting for one'
+}
+
 # --- the two tasks that carry the rest without you ---------------------------
 Step 'Scheduling the rest'
 Remove-ConsolizeTasks
