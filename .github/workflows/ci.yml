@@ -10,6 +10,14 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Windows runners queue for about ten minutes here, so two runs for the same
+# commit means the second one waits behind the first to say the same thing.
+# Superseded runs are cancelled instead: what matters is the answer for the tip
+# of the branch, not the answer for every commit that got pushed on the way.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   scripts:
     runs-on: windows-latest
