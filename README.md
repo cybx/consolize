@@ -339,6 +339,39 @@ app. Run or update it on its own with:
 .\install-steamidra.ps1
 ```
 
+### A media centre too
+
+`bootstrap-gaming.ps1` offers it, or on its own:
+
+```powershell
+.\install-htpc.ps1
+.\install-htpc.ps1 -Apps kodi,jellyfin -Services netflix,primevideo
+```
+
+Two kinds of thing, and they behave differently:
+
+**Players** (Kodi, Jellyfin Media Player, Plex HTPC, Stremio) are real
+applications. Kodi reads a gamepad natively, so it is the one that actually
+feels like a console, and it has add-ons for Jellyfin and Plex if you would
+rather have one front door.
+
+**Streaming services** (Netflix, Prime Video, Disney+, Max, Globoplay,
+Crunchyroll) have no native Windows application any more. Netflix's "app" in the
+Microsoft Store has been an Edge web app since 2024, so on LTSC, which has no
+Store, nothing is lost by opening the site in Edge directly with `--app`: a
+window with no tabs, no address bar and no back button over the film, each
+service on its own profile so they stay signed in separately.
+
+Edge and not Chrome or Firefox, deliberately. Netflix serves 1080p and 4K only
+to browsers that can use PlayReady, which on Windows means Edge (Chrome gained
+it recently on Windows 11, Firefox is still capped at 720p). Getting 720p on a
+television because of the browser would be a strange way to lose.
+
+The catch, said plainly: **a web app does not read a gamepad.** Set Steam's
+Settings > Controller > Desktop layout to one with right-stick mouse, and bind a
+chord to the on-screen keyboard for signing in. The native players do not need
+any of that.
+
 ### Taking it back off
 
 `rescue.ps1` is for a setup that went wrong, and only undoes what can hide the

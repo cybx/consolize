@@ -156,6 +156,7 @@ $catalog = [ordered]@{
     java      = @{ Label = 'Java (only for third-party Minecraft launchers and servers)'; Recommended = $false }
     media     = @{ Label = 'VLC and mpv (play anything on the TV, no codec pack)'; Recommended = $true }
     youtube   = @{ Label = 'YouTube on the TV, gamepad driven (VacuumTube)';       Recommended = $true }
+    htpc      = @{ Label = 'Media centre: Kodi, Jellyfin, Plex, and Netflix and friends'; Recommended = $false }
     tools     = @{ Label = 'Git and 7-Zip';                                        Recommended = $true }
     steamidra = @{ Label = 'SteaMidra (latest release, added as a non-Steam app)'; Recommended = $true }
     torrent   = @{ Label = 'qBittorrent plus a torrent folder layout';             Recommended = $false }
@@ -198,7 +199,7 @@ if (-not $selected -or $selected.Count -eq 0) { Write-Host 'Nothing selected, by
 #
 # defender last: its exclusions cover the game folders, which do not exist until
 # the installs above have run.
-$order = @('frontends', 'updates', 'gpu', 'runtimes', 'java', 'media', 'youtube', 'tools', 'steamidra', 'torrent', 'defender')
+$order = @('frontends', 'updates', 'gpu', 'runtimes', 'java', 'media', 'youtube', 'htpc', 'tools', 'steamidra', 'torrent', 'defender')
 $selected = $order | Where-Object { $selected -contains $_ }
 
 Write-Host ''
@@ -272,6 +273,19 @@ foreach ($key in $selected) {
             # needs. System Java is for servers, third-party launchers (Prism,
             # MultiMC) and some mod loaders.
             Install-FirstAvailable @('Microsoft.OpenJDK.21', 'EclipseAdoptium.Temurin.21.JDK') 'Java (OpenJDK 21)'
+        }
+
+        'htpc' {
+            # Its own script: which players and which services is a question in
+            # itself, and half of it is not a winget id at all.
+            $htpc = Join-Path $PSScriptRoot 'install-htpc.ps1'
+            if (Test-Path $htpc) {
+                $arguments = @{}
+                if ($NonInteractive) { $arguments.NonInteractive = $true }
+                try { & $htpc @arguments } catch { Write-Warning "Media centre: $($_.Exception.Message)" }
+            } else {
+                Write-Warning 'install-htpc.ps1 is not here, skipping.'
+            }
         }
 
         'youtube' {
