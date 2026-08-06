@@ -309,7 +309,8 @@ internal static class Program
         while (!ct.IsCancellationRequested)
         {
             // This process IS the shell. An escaping exception ends it, and
-            // Shell Launcher restarts it straight back into the same throw:
+            // whatever restarts the shell (Winlogon's AutoRestartShell, or
+            // Shell Launcher) brings it back into the same throw:
             // a black screen in a restart loop. Nothing in here may propagate.
             try
             {

@@ -2,6 +2,38 @@
 
 End-to-end test of consolize in a throwaway VM, before touching real hardware.
 
+## The short version, on a fresh VM
+
+Everything below is the detail. In practice, from a clean Windows install:
+
+```powershell
+irm https://raw.githubusercontent.com/cybx/consolize/main/get.ps1 | iex
+```
+
+Answer the interview. Give the console account a real password rather than
+letting it fall back to the account name. Choose `skip` or `security` for
+updates unless you are testing updates. Then leave: the only question after that
+point is the Steam sign-in, in the console account's own session.
+
+Three things about a VM specifically, all of which cost hours to rediscover:
+
+- **A Hyper-V VM has no GPU**, and Big Picture is Chromium, so it hangs or draws
+  black. Either accept it and answer "carry on" when asked, or set
+  `"FrontendArgs": "-cef-disable-gpu -bigpicture"` in
+  `C:\ProgramData\Consolize\config.json`. To test the shell mechanism alone,
+  point the frontend at `notepad.exe`, which needs no GPU.
+- **Enhanced Session Mode connects over RDP**, and an ordinary user may not sign
+  in that way. It will show a logon screen refusing the console account while
+  that account is already signed in behind it. Basic session is the honest view.
+  See the section below.
+- **Watch the real session from the host** when in doubt, rather than trusting
+  what vmconnect shows:
+  ```powershell
+  Invoke-Command -VMName consolize-lab -Credential (Get-Credential) -ScriptBlock {
+    (Get-CimInstance Win32_ComputerSystem).UserName; query user
+  }
+  ```
+
 ## 0. Create the VM (host, admin PowerShell)
 
 ```powershell

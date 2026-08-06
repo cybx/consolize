@@ -69,7 +69,7 @@ No `Winlogon\Shell` registry rewrite, no scheduled task launching a VBS that lau
 
 | Phase | What | Status |
 |---|---|---|
-| F1 | Session manager (watchdog shell + desktop on demand) | **WIP, this repo** |
+| F1 | Session manager (watchdog shell + desktop on demand) | **shipped** |
 | F2 | Quiet layer (Game Bar off, DND, update discipline, autologon via LSA, boot UI) | **first pass in `setup/`** |
 | F3 | Power: rest mode (sleep/hibernate profile, wake by controller, no core parking) | **first pass in `setup/`** |
 | F4 | Controller-first quick settings (Bluetooth pairing, audio output, volume, wifi) without touching a desktop | **shipped** |
