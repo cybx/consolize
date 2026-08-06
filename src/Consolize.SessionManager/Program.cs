@@ -768,6 +768,13 @@ internal static class Program
     // so spawning explorer.exe yields the full desktop (taskbar included) and
     // killing it returns to a pure console session. No registry flip-flopping.
 
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern IntPtr FindWindow(string? className, string? windowName);
+
+    /// <summary>The taskbar. Its presence is the difference between "explorer
+    /// took over as the shell" and "explorer opened a folder window".</summary>
+    private static bool TaskbarPresent() => FindWindow("Shell_TrayWnd", null) != IntPtr.Zero;
+
     private static void EnterDesktop()
     {
         _mode = SessionMode.Desktop;
@@ -786,7 +793,38 @@ internal static class Program
         catch (Exception ex)
         {
             Log($"failed to start explorer: {ex.Message}");
+            return;
         }
+
+        // Whether this actually yields a desktop depends on how the shell was
+        // replaced. With the per-user Winlogon Shell value, no shell is
+        // registered, so explorer takes over and brings the taskbar. Under
+        // Shell Launcher, Microsoft documents that it does not: you get a File
+        // Explorer window and nothing else. Check, rather than assume, and say
+        // so once instead of leaving the user staring at a folder.
+        Task.Run(() =>
+        {
+            for (var i = 0; i < 20; i++)
+            {
+                Thread.Sleep(500);
+                if (TaskbarPresent())
+                {
+                    Log("desktop is up (taskbar present)");
+                    return;
+                }
+            }
+
+            Log("explorer started but no taskbar appeared: this session has a shell " +
+                "registered, so explorer only opens a folder window. That is expected " +
+                "under Shell Launcher; the per-user registry shell does not have it.");
+            try
+            {
+                _trayIcon?.ShowBalloonTip(10000, "consolize",
+                    "Explorer opened without a desktop. This machine's shell mode does not " +
+                    "allow switching without signing out.", ToolTipIcon.Warning);
+            }
+            catch { /* the tray may already be gone */ }
+        });
     }
 
     private static void EnterConsole()

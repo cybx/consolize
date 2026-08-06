@@ -29,7 +29,10 @@ param(
     [string]$UserName,
     # NetFx3 pulls ~250 MB from Windows Update and can take 15 minutes; handy
     # when resuming a run that already spent that time, or on a slow link.
-    [switch]$SkipNetFx3
+    [switch]$SkipNetFx3,
+    # How the shell gets replaced. registry keeps desktop mode working, which is
+    # why it is the default; see enable-shell-launcher.ps1 for the trade.
+    [ValidateSet('registry', 'shelllauncher')] [string]$ShellMethod = 'registry'
 )
 $ErrorActionPreference = 'Stop'
 
@@ -114,7 +117,8 @@ if ($Finish) {
     # *>&1, not 2>&1: preflight reports through Write-Host, which is stream 6.
     # With 2>&1 the log recorded "fix the issues above" and no issues.
     $frontend = if ($answers.BootInto) { $answers.BootInto } else { 'steam' }
-    $preflightOut = & (Join-Path $here 'preflight.ps1') -UserName $user -Frontend $frontend *>&1
+    $finishMethod = if ($answers.ShellMethod) { $answers.ShellMethod } else { 'registry' }
+    $preflightOut = & (Join-Path $here 'preflight.ps1') -UserName $user -Frontend $frontend -Method $finishMethod *>&1
     $preflightOut | ForEach-Object { Write-FinishLog "  $_" }
     if ($LASTEXITCODE -ne 0) {
         Write-FinishLog 'preflight failed; NOT replacing the shell (this is the safe outcome)'
@@ -124,7 +128,7 @@ if ($Finish) {
 
     Write-FinishLog 'preflight passed, replacing the shell'
     try {
-        & (Join-Path $here 'enable-shell-launcher.ps1') -UserName $user -SkipPreflight *>&1 |
+        & (Join-Path $here 'enable-shell-launcher.ps1') -UserName $user -Method $finishMethod -SkipPreflight *>&1 |
             ForEach-Object { Write-FinishLog "  $_" }
 
         # Only now: everything before this point can fail, and a hidden logon
@@ -276,6 +280,7 @@ if ($Unattended) {
         Aggressive  = $aggressive
         RestMode    = $restMode
         Autologon   = $autologon
+        ShellMethod = $ShellMethod
     }
 
     Write-Host ''

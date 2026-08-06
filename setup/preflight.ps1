@@ -13,7 +13,8 @@ controller in your hand, that is a dead end.
 param(
     [string]$UserName = 'gamer',
     [string]$ShellPath = 'C:\Program Files\Consolize\consolize.exe',
-    [ValidateSet('steam', 'playnite', 'custom')] [string]$Frontend = 'steam'
+    [ValidateSet('steam', 'playnite', 'hydra', 'custom')] [string]$Frontend = 'steam',
+    [ValidateSet('registry', 'shelllauncher')] [string]$Method = 'registry'
 )
 $ErrorActionPreference = 'Continue'
 
@@ -85,11 +86,17 @@ Write-Host 'consolize preflight' -ForegroundColor Cyan
 Write-Host ''
 
 # --- Windows edition ---------------------------------------------------------
+# Only the Shell Launcher method needs a particular edition. The per-user
+# registry shell, which is the default, works everywhere.
 $caption = (Get-CimInstance Win32_OperatingSystem).Caption
-if ($caption -match 'Enterprise|Education|IoT') {
-    Write-Check PASS 'Windows edition supports Shell Launcher' $caption
+if ($Method -eq 'shelllauncher') {
+    if ($caption -match 'Enterprise|Education|IoT') {
+        Write-Check PASS 'Windows edition supports Shell Launcher' $caption
+    } else {
+        Write-Check FAIL 'Windows edition has no Shell Launcher' "$caption. Needs Enterprise, Education or IoT Enterprise, or use -Method registry."
+    }
 } else {
-    Write-Check FAIL 'Windows edition has no Shell Launcher' "$caption. Needs Enterprise, Education or IoT Enterprise."
+    Write-Check PASS 'Shell method: per-user registry' "$caption (no edition requirement)"
 }
 
 # --- consolize installed -----------------------------------------------------
@@ -171,6 +178,23 @@ it and the frontend would never start. Install it while signed in as $UserName.
 "@
         } else {
             Write-Check FAIL 'Playnite not installed' 'winget install Playnite.Playnite'
+        }
+    }
+    'hydra' {
+        # Hydra installs per user, like Playnite, so it has to exist in the
+        # console account's profile rather than the one running this check.
+        $profileDir = (Get-CimInstance Win32_UserProfile -ErrorAction SilentlyContinue |
+            Where-Object { $_.LocalPath -like "*\$UserName" } | Select-Object -First 1).LocalPath
+        $found = $null
+        if ($profileDir) {
+            $candidate = Join-Path $profileDir 'AppData\Local\Programs\Hydra\Hydra.exe'
+            if (Test-Path $candidate) { $found = $candidate }
+        }
+        if ($found) {
+            Write-Check PASS 'Hydra installed for the console account' $found
+            Write-Check WARN 'Hydra is mouse-first' 'It is not gamepad navigable, so it works better launched from Steam or Playnite than as the shell frontend itself.'
+        } else {
+            Write-Check FAIL "Hydra not installed for '$UserName'" 'It installs per user: install it while signed in as that account.'
         }
     }
     'custom' { Write-Check WARN 'Custom frontend' 'Check CustomCommand in %LOCALAPPDATA%\Consolize\config.json yourself.' }

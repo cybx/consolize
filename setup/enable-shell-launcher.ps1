@@ -1,21 +1,43 @@
 #Requires -RunAsAdministrator
 <#
-Configures Windows Shell Launcher v2 so that Consolize replaces explorer.exe
-as the shell for ONE specific user (the gamer account).
+Makes consolize the shell for ONE account, leaving every other account with the
+normal Windows desktop.
 
-Requirements:
-  - Windows 11 Enterprise, Education or IoT Enterprise (LTSC included).
-    Home/Pro do not ship Shell Launcher.
-  - Consolize installed (run install.ps1 first).
+Two mechanisms, and the choice matters more than it looks:
 
-SAFETY:
-  - The DEFAULT shell for every other user stays explorer.exe.
-  - Keep a second admin account with the default shell so you can always log
-    in and undo this (or undo it over SSH with disable-shell-launcher.ps1).
-  - Test on a VM checkpoint first (see testlab/New-TestVm.ps1).
+  -Method registry   (default)
+      Sets Winlogon's per-user Shell value in that account's hive. Winlogon
+      starts consolize instead of explorer.exe for that user only.
+      Desktop mode works: with no shell registered, launching explorer.exe
+      later makes it take over as the shell, taskbar and desktop included.
+      Works on every Windows edition, Home and Pro included.
+
+  -Method shelllauncher
+      The Shell Launcher feature (WESL_UserSetting), which Enterprise,
+      Education and IoT Enterprise have. It restarts the shell for you on exit,
+      with configurable actions per return code.
+      BUT: Microsoft states that under Shell Launcher, launching explorer.exe
+      from the custom shell does NOT restore the desktop, it only opens a File
+      Explorer window, because the system suppresses the shell components.
+      Reaching the desktop then means switching the shell back and signing out.
+      https://learn.microsoft.com/en-us/answers/questions/5576492/
+
+Which is why registry is the default here: consolize is its own watchdog and
+never exits on purpose, so Shell Launcher's restart is worth less to it than
+desktop mode is.
+
+SAFETY
+  - Every other account keeps explorer.exe.
+  - Keep a second administrator account. That is the way back in.
+  - rescue.ps1 undoes all of this, and can be reached from Task Manager, which
+    opens over any shell with Ctrl+Shift+Esc.
+
+  .\enable-shell-launcher.ps1 -UserName gamer
+  .\enable-shell-launcher.ps1 -UserName gamer -Method shelllauncher
 #>
 param(
     [Parameter(Mandatory)] [string]$UserName,
+    [ValidateSet('registry', 'shelllauncher')] [string]$Method = 'registry',
     [string]$ShellPath = 'C:\Program Files\Consolize\consolize.exe',
     [ValidateSet('RestartShell', 'RestartDevice', 'ShutdownDevice', 'DoNothing')]
     [string]$OnShellExit = 'RestartShell',
@@ -37,6 +59,61 @@ if (-not $SkipPreflight) {
     }
 }
 
+$sid = (New-Object System.Security.Principal.NTAccount($UserName)).Translate(
+    [System.Security.Principal.SecurityIdentifier]).Value
+
+# ============================================================ registry =======
+
+if ($Method -eq 'registry') {
+    # The value lives in the target account's own hive, which is only on disk
+    # until that account signs in for the first time.
+    $hive = "Registry::HKEY_USERS\$sid"
+    $mounted = $null
+
+    if (-not (Test-Path $hive)) {
+        $profileDir = (Get-CimInstance Win32_UserProfile -ErrorAction SilentlyContinue |
+            Where-Object { $_.SID -eq $sid } | Select-Object -First 1).LocalPath
+        if (-not $profileDir -or -not (Test-Path (Join-Path $profileDir 'NTUSER.DAT'))) {
+            throw @"
+'$UserName' has no profile yet, so its per-user shell cannot be set.
+A profile appears the first time an account signs in. Sign in as $UserName
+once, sign out, and run this again. (Or use -Method shelllauncher, which
+stores the setting outside the user's hive, at the cost of desktop mode.)
+"@
+        }
+        $mounted = "consolize-$sid"
+        & reg.exe load "HKU\$mounted" (Join-Path $profileDir 'NTUSER.DAT') *>$null
+        if ($LASTEXITCODE -ne 0) { throw "Could not load $UserName's registry hive (is that account signed in?)." }
+        $hive = "Registry::HKEY_USERS\$mounted"
+    }
+
+    try {
+        $key = Join-Path $hive 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+        if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
+        New-ItemProperty -Path $key -Name 'Shell' -Value $ShellPath -PropertyType String -Force | Out-Null
+        Write-Host "Shell for '$UserName' set to $ShellPath"
+        Write-Host '  (per-user: every other account still gets explorer.exe)'
+    } finally {
+        if ($mounted) {
+            [GC]::Collect(); [GC]::WaitForPendingFinalizers()
+            & reg.exe unload "HKU\$mounted" *>$null
+        }
+    }
+
+    # Winlogon restarts the shell process if it exits. On by default, but say so
+    # out loud: it is what stands between a crash and an empty session.
+    $wl = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+    New-ItemProperty -Path $wl -Name 'AutoRestartShell' -Value 1 -PropertyType DWord -Force | Out-Null
+    Write-Host '  AutoRestartShell on: Winlogon brings the shell back if it ever exits'
+
+    Write-Host ''
+    Write-Host "Done. Sign '$UserName' out and in (or reboot) to boot into consolize." -ForegroundColor Green
+    Write-Host "Undo with: .\disable-shell-launcher.ps1 -UserName $UserName" -ForegroundColor DarkGray
+    return
+}
+
+# ======================================================= shell launcher =====
+
 Write-Host 'Enabling the Shell Launcher optional feature (no restart)...'
 dism /online /enable-feature /featurename:Client-EmbeddedShellLauncher /all /norestart | Out-Null
 # 3010 is ERROR_SUCCESS_REBOOT_REQUIRED, the normal companion of /norestart, and
@@ -51,7 +128,6 @@ if ($rebootPending) { Write-Host '  enabled, servicing wants a restart (expected
 
 $actionMap = @{ RestartShell = 0; RestartDevice = 1; ShutdownDevice = 2; DoNothing = 3 }
 $action = [uint32]$actionMap[$OnShellExit]
-$sid = (New-Object System.Security.Principal.NTAccount($UserName)).Translate([System.Security.Principal.SecurityIdentifier]).Value
 $ns = 'root\standardcimv2\embedded'
 
 Write-Host "Setting custom shell for '$UserName' ($sid): $ShellPath (on exit: $OnShellExit)"
@@ -71,4 +147,7 @@ $null = Invoke-CimMethod -Namespace $ns -ClassName WESL_UserSetting -MethodName 
 
 $enabled = (Invoke-CimMethod -Namespace $ns -ClassName WESL_UserSetting -MethodName IsEnabled).Enabled
 Write-Host "Shell Launcher enabled: $enabled"
-Write-Host "Log '$UserName' out and back in (or reboot) to boot into Consolize."
+Write-Warning 'Desktop mode will not work under Shell Launcher: launching explorer.exe'
+Write-Warning 'there opens a File Explorer window rather than the desktop. Reaching the'
+Write-Warning 'desktop means switching the shell back and signing out.'
+Write-Host "Log '$UserName' out and back in (or reboot) to boot into consolize."

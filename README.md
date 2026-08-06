@@ -14,14 +14,29 @@ If your library is 100% Proton-friendly, do use them. This project exists for th
 
 ## Why Windows 11 IoT Enterprise LTSC?
 
-This project targets **Windows 11 Enterprise / Education / IoT Enterprise (LTSC included)** on purpose, instead of hacking Home/Pro:
+Any edition works. LTSC is what this is developed and tested against, because it
+ships lean (no Widgets, Copilot, Teams or Store apps) and only receives quality
+updates, so no feature update will ever break your living room.
 
-- **Shell Launcher v2** is a native, Microsoft-supported kiosk feature of these editions. It replaces the shell per user and automatically restarts it if it exits or crashes. That is literally console behavior, with zero registry hacks and zero timing races.
-- IoT Enterprise LTSC ships lean (no Widgets, Copilot, Teams or Store apps) and only receives quality updates. No feature update will ever break your living room.
+### How the shell is replaced
+
+Two mechanisms, and the default is the one that keeps desktop mode working:
+
+| | `-Method registry` (default) | `-Method shelllauncher` |
+|---|---|---|
+| What it does | Sets Winlogon's per-user `Shell` value in that account's hive | The Shell Launcher feature (`WESL_UserSetting`) |
+| Editions | all, Home and Pro included | Enterprise, Education, IoT Enterprise |
+| Restart on exit | Winlogon's `AutoRestartShell` | built in, with per-return-code actions |
+| **Desktop mode** | **works**: no shell is registered, so launching `explorer.exe` makes it take over, taskbar and all | **does not**: Microsoft [states](https://learn.microsoft.com/en-us/answers/questions/5576492/) that explorer there opens a folder window, not a desktop |
+
+consolize is its own watchdog and never exits on purpose, so Shell Launcher's
+restart handling is worth less to it than being able to reach the desktop. The
+session manager checks for the taskbar after starting explorer and says so in
+the log when it does not appear, rather than leaving you looking at a folder.
 
 ## How it works
 
-`consolize.exe` is a small .NET session manager that **is** the shell (via Shell Launcher) for a dedicated gamer account:
+`consolize.exe` is a small .NET session manager that **is** the shell for a dedicated gamer account:
 
 1. It launches the configured frontend (Steam Big Picture by default; Playnite Fullscreen, Hydra or any executable via config).
 2. It watches the frontend and relaunches it if it crashes, with a crash-loop breaker that falls back to the desktop instead of flapping forever.
@@ -188,7 +203,7 @@ See [docs/architecture.md](docs/architecture.md) for design decisions and the fu
 
 ## Credits
 
-Idea inspired by [GamesDows](https://github.com/jazir555/GamesDows) by jazir555, which pioneered "boot Windows into Big Picture" with batch scripts. consolize is a from-scratch implementation (no code reused) built specifically around Shell Launcher v2.
+Idea inspired by [GamesDows](https://github.com/jazir555/GamesDows) by jazir555, which pioneered "boot Windows into Big Picture" with batch scripts. consolize is a from-scratch implementation, with no code reused.
 
 ## License
 

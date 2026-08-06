@@ -4,9 +4,31 @@
 
 1. **The session manager is the shell, not Steam.** Shell Launcher restarts *us* if we ever die; *we* watchdog the frontend. Putting Steam directly as the shell (the GamesDows approach, via `Winlogon\Shell`) means a Steam crash leaves a dead session, and "exit to desktop" needs registry flip-flopping with timed scripts. A tiny manager process kills the whole class of problems and gives us a place to hang future features (quick settings, startup sequencing, telemetry-free status).
 
-2. **Explorer on demand.** Under Shell Launcher the `Winlogon\Shell` value still points at `explorer.exe`, so spawning `explorer.exe` yields the full desktop (taskbar included) and killing it returns to a pure console session. No registry rewrites, no taskbar flash at boot because Explorer simply never starts unless asked.
+2. **Explorer on demand, and what that costs.** When no shell is registered for
+   the session, launching `explorer.exe` makes it take over as the shell,
+   taskbar and desktop included; killing it returns to a pure console session.
+   Explorer never starts unless asked, so there is no taskbar flash at boot.
 
-3. **Target editions: Enterprise / Education / IoT Enterprise (LTSC).** Shell Launcher v2 is the whole foundation and Home/Pro do not have it. A registry-shell fallback for Home/Pro is explicitly out of scope for v1 (GamesDows already serves that audience).
+   This is the reason the default shell mechanism is the per-user `Winlogon\Shell`
+   registry value rather than the Shell Launcher feature. Microsoft
+   [states](https://learn.microsoft.com/en-us/answers/questions/5576492/) that
+   under Shell Launcher the system suppresses the shell components, so launching
+   explorer there opens a File Explorer window and nothing more; reaching the
+   desktop means switching the shell back and signing out. An earlier version of
+   this document claimed the opposite, which was wrong.
+
+   Because the answer depends on how the shell was replaced, the session manager
+   does not assume: after starting explorer it waits for `Shell_TrayWnd` and logs
+   plainly when the taskbar never appears.
+
+3. **Editions.** The default mechanism, the per-user `Winlogon\Shell` value, works
+   on every edition including Home and Pro. Shell Launcher, available on
+   Enterprise, Education and IoT Enterprise, is offered as `-Method shelllauncher`
+   for anyone who wants its restart handling and can live without desktop mode.
+   Note it is Shell Launcher v1 (`WESL_UserSetting`, which hosts a Win32 shell
+   through `eshell.exe`); v2 exists for UWP shells and is not what this uses.
+   IoT Enterprise LTSC remains the edition this is developed against, for its
+   leanness and its ten-year servicing, not because the shell needs it.
 
 4. **Autologon via LSA secret, never plaintext.** The classic `DefaultPassword` registry value stores the password in cleartext. Sysinternals Autologon stores it as an LSA secret. F2 automates that.
 
