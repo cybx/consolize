@@ -91,6 +91,32 @@ session manager logic itself, point the frontend at anything: edit
 and the watchdog, crash-loop breaker and desktop toggle can all be exercised
 without a GPU. Steam Big Picture itself is a bare-metal test.
 
+## Watch out: Enhanced Session Mode lies to you here
+
+Hyper-V's Enhanced Session Mode connects **over RDP**, and only administrators
+and members of *Remote Desktop Users* may sign in that way. The console account
+is an ordinary user, so an enhanced session shows a logon screen offering your
+admin account and refuses the console account with:
+
+> To sign in remotely, you need the right to sign in through Remote Desktop
+> Services.
+
+That looks exactly like autologon having failed, while the real console session
+is sitting behind it, logged in and running perfectly. Two ways out:
+
+```powershell
+# see the real machine, which is what a TV would show
+# (vmconnect: toggle off the enhanced session, or)
+Set-VMHost -EnableEnhancedSessionMode $false
+
+# or let the console account in over RDP too, a lab convenience only:
+# on a real console this grants remote access to the account that plays games
+Add-LocalGroupMember -Group 'Remote Desktop Users' -Member gamer
+```
+
+Basic session is the honest view: it is the actual framebuffer. Enhanced session
+buys clipboard and resolution, and costs you this confusion.
+
 ## 5. Escape hatches
 
 If the custom shell leaves you stuck:

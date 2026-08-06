@@ -128,4 +128,23 @@ Set-ItemProperty $wl -Name DefaultDomainName -Value $Domain -Type String
 # kill any cleartext leftover from other tools (GamesDows and friends)
 Remove-ItemProperty $wl -Name DefaultPassword -ErrorAction SilentlyContinue
 
-Write-Host "Autologon set for $Domain\$UserName (password stored as LSA secret, not plaintext)."
+# Read back rather than assume: a wrong DefaultUserName looks configured and
+# still leaves the machine sitting at a logon screen.
+$check = Get-ItemProperty $wl
+$problems = @()
+if ($check.AutoAdminLogon -ne '1') { $problems += 'AutoAdminLogon is not 1' }
+if ($check.DefaultUserName -ne $UserName) { $problems += "DefaultUserName is '$($check.DefaultUserName)', expected '$UserName'" }
+if ($check.PSObject.Properties.Name -contains 'DefaultPassword') { $problems += 'a plaintext DefaultPassword is still present' }
+
+$account = Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue
+if ($account -and -not $account.PasswordLastSet) {
+    $problems += "$UserName has never had a password set, so Windows will demand one at sign-in and autologon cannot happen"
+}
+
+if ($problems) {
+    Write-Warning "Autologon may not work for $Domain\$UserName :"
+    foreach ($p in $problems) { Write-Warning "  - $p" }
+} else {
+    Write-Host "Autologon set for $Domain\$UserName (password stored as LSA secret, not plaintext)."
+    Write-Host 'Verified: AutoAdminLogon=1, DefaultUserName matches, no plaintext password.'
+}

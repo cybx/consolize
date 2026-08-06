@@ -246,8 +246,15 @@ if ($admins) {
 # --- autologon ---------------------------------------------------------------
 $wl = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
 $auto = Get-ItemProperty $wl -ErrorAction SilentlyContinue
-if ($auto.AutoAdminLogon -eq '1' -and $auto.DefaultUserName) {
+if ($auto.AutoAdminLogon -eq '1' -and $auto.DefaultUserName -eq $UserName) {
     Write-Check PASS 'Autologon configured' "user: $($auto.DefaultUserName)"
+} elseif ($auto.AutoAdminLogon -eq '1' -and $auto.DefaultUserName) {
+    # Pointing at the wrong account is worse than not being set at all: it looks
+    # configured and the machine still stops at a logon screen.
+    Write-Check FAIL "Autologon points at '$($auto.DefaultUserName)', not '$UserName'" @"
+The console account is the one that has to log in by itself. Fix:
+  .\set-autologon.ps1 -UserName $UserName
+"@
 } else {
     Write-Check WARN 'Autologon not configured' "The console will stop at the logon screen. Fix: .\set-autologon.ps1 -UserName $UserName"
 }
