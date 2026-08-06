@@ -195,7 +195,35 @@ if ($Unattended) {
     $userPassword = $null
     if (-not $userExists) {
         Write-Host "  '$UserName' does not exist yet and will be created."
-        $userPassword = Read-Host "  password for $UserName (Enter for none)" -AsSecureString
+        Write-Host '  You type this password once: the console signs in by itself afterwards,'
+        Write-Host '  from an LSA secret, never from anything written to disk in the clear.'
+
+        # Never leave it blank. An account with no password makes Windows stop at
+        # the logon screen asking to set one, and automatic logon never fires.
+        $asked = 0
+        while ($true) {
+            $userPassword = Read-Host "  password for $UserName" -AsSecureString
+            if ($userPassword.Length -gt 0) { break }
+
+            if ($asked -eq 0) {
+                Write-Host ''
+                Write-Host '  An empty password does not work here: Windows stops at the logon' -ForegroundColor Yellow
+                Write-Host '  screen demanding one, and the console never logs itself in.' -ForegroundColor Yellow
+                Write-Host "  Type a password, or press Enter again to use '$UserName'." -ForegroundColor Yellow
+                $asked++
+                continue
+            }
+
+            $userPassword = ConvertTo-SecureString $UserName -AsPlainText -Force
+            Write-Host ''
+            Write-Host "  Using '$UserName' as the password." -ForegroundColor Yellow
+            Write-Host '  Worth knowing: it is as weak as it looks, so anyone at the keyboard can'
+            Write-Host '  sign in. Fine for a console on your TV, not for a machine on a desk'
+            Write-Host '  someone else uses. Change it any time with:'
+            Write-Host "    Set-LocalUser -Name $UserName -Password (Read-Host -AsSecureString)"
+            Write-Host "    .\set-autologon.ps1 -UserName $UserName"
+            break
+        }
     } else {
         Write-Host "  '$UserName' already exists."
     }
@@ -290,7 +318,14 @@ if (-not (Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue)) {
 
     $password = $script:newUserPassword
     if (-not $password -and -not $Unattended) {
-        $password = Read-Host "  password for $UserName (Enter for none)" -AsSecureString
+        $password = Read-Host "  password for $UserName (Enter to use '$UserName')" -AsSecureString
+    }
+    # Resumed unattended, or the prompt came back empty: fall back to the account
+    # name rather than creating a passwordless account, which Windows treats as
+    # "must set a password at the next sign-in" and which breaks autologon.
+    if (-not $password -or $password.Length -eq 0) {
+        $password = ConvertTo-SecureString $UserName -AsPlainText -Force
+        Write-Host "  no password given, using '$UserName'"
     }
 
     # -NoPassword and -PasswordNeverExpires live in different parameter sets,
@@ -383,9 +418,14 @@ Step 'Emptying Windows startup'
 
 if ($a.Autologon) {
     Step 'Autologon'
-    Write-Host "  Enter $UserName's password so the console can log in by itself."
-    Write-Host '  It is stored as an LSA secret, never as plaintext.'
-    & (Join-Path $here 'set-autologon.ps1') -UserName $UserName
+    if ($script:newUserPassword -and $script:newUserPassword.Length -gt 0) {
+        Write-Host '  Reusing the password you already typed; stored as an LSA secret.'
+        & (Join-Path $here 'set-autologon.ps1') -UserName $UserName -Password $script:newUserPassword
+    } else {
+        Write-Host "  Enter $UserName's password so the console can log in by itself."
+        Write-Host '  It is stored as an LSA secret, never as plaintext.'
+        & (Join-Path $here 'set-autologon.ps1') -UserName $UserName
+    }
 }
 
 # --- the two tasks that carry the rest without you ---------------------------

@@ -13,6 +13,9 @@ Usage:
 param(
     [Parameter(Mandatory)] [string]$UserName,
     [string]$Domain = $env:COMPUTERNAME,
+    # Passed by setup-console so the password is typed once for the whole setup.
+    # Never a plain string: it stays a SecureString until the LSA call.
+    [System.Security.SecureString]$Password,
     [switch]$Remove
 )
 $ErrorActionPreference = 'Stop'
@@ -110,7 +113,8 @@ if ($Remove) {
     return
 }
 
-$secure = Read-Host "Password for $Domain\$UserName" -AsSecureString
+$secure = if ($Password -and $Password.Length -gt 0) { $Password }
+          else { Read-Host "Password for $Domain\$UserName" -AsSecureString }
 $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
 try { $plain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
 finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
