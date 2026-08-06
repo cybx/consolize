@@ -10,10 +10,6 @@ It does the two things that only exist inside this account:
 A marker file in %LOCALAPPDATA% keeps it from running again. The scheduled task
 itself is removed by the SYSTEM finish task once the shell is replaced.
 #>
-param(
-    # Set when this script relaunched itself; see just below.
-    [switch]$Relaunched
-)
 $ErrorActionPreference = 'Continue'
 
 $here = $PSScriptRoot
@@ -25,12 +21,18 @@ $marker = Join-Path $env:LOCALAPPDATA 'Consolize\first-logon-done'
 # machine being driven with a mouse that is the most natural thing to do, and it
 # looks exactly like a hang, which is the worst thing this window could do.
 #
-# Console settings are read when the window is created, so turning it off has to
-# happen before that: set it, then start again in a fresh window, once.
+# Change both the saved setting and this window's live console mode. Keeping the
+# same window matters: replacing it with a fresh powershell.exe leaves a blank
+# blue window on a cold first logon and looks exactly like another hang.
 $consoleKey = 'HKCU:\Console'
 $quickEdit = (Get-ItemProperty $consoleKey -Name QuickEdit -ErrorAction SilentlyContinue).QuickEdit
 
-if (-not $Relaunched -and $quickEdit -ne 0) {
+Write-Host ''
+Write-Host '  consolize: starting the first-logon setup...' -ForegroundColor Cyan
+Write-Host '  Preparing this window; setup will continue here automatically.'
+Write-Host ''
+
+if ($quickEdit -ne 0) {
     if (-not (Test-Path $consoleKey)) { New-Item -Path $consoleKey -Force | Out-Null }
     New-ItemProperty -Path $consoleKey -Name 'QuickEdit' -Value 0 -PropertyType DWord -Force | Out-Null
 
@@ -39,17 +41,31 @@ if (-not $Relaunched -and $quickEdit -ne 0) {
     if (Test-Path $psKey) {
         New-ItemProperty -Path $psKey -Name 'QuickEdit' -Value 0 -PropertyType DWord -Force | Out-Null
     }
+}
 
-    try {
-        Start-Process powershell -ArgumentList @(
-            '-NoProfile', '-ExecutionPolicy', 'Bypass',
-            '-File', "`"$PSCommandPath`"", '-Relaunched'
-        ) -ErrorAction Stop
-        return
-    } catch {
-        # not fatal: carry on in this window, a click will just pause it
-        Write-Warning "Could not restart in a click-proof window: $($_.Exception.Message)"
+# QuickEdit is bit 0x40 on the input handle. ENABLE_EXTENDED_FLAGS (0x80) must
+# be present when clearing it. If a console host does not expose these APIs, the
+# saved registry setting still protects every window opened after this one.
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class ConsolizeConsoleMode
+{
+    [DllImport("kernel32.dll")] public static extern IntPtr GetStdHandle(int nStdHandle);
+    [DllImport("kernel32.dll")] public static extern bool GetConsoleMode(IntPtr handle, out uint mode);
+    [DllImport("kernel32.dll")] public static extern bool SetConsoleMode(IntPtr handle, uint mode);
+}
+'@ -ErrorAction SilentlyContinue
+
+try {
+    $inputHandle = [ConsolizeConsoleMode]::GetStdHandle(-10)
+    [uint32]$consoleMode = 0
+    if ([ConsolizeConsoleMode]::GetConsoleMode($inputHandle, [ref]$consoleMode)) {
+        $consoleMode = [uint32](($consoleMode -band 0xffffffbfL) -bor 0x80L)
+        [void][ConsolizeConsoleMode]::SetConsoleMode($inputHandle, $consoleMode)
     }
+} catch {
+    Write-Warning 'Could not disable QuickEdit in this window; avoid clicking inside it while setup runs.'
 }
 
 # What the SYSTEM finish task waits for: this account is ready to become a
