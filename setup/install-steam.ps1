@@ -18,7 +18,8 @@ launches the frontend, so leaving it means two Steams racing at logon.
 #>
 param(
     [switch]$LaunchForLogin,
-    [switch]$CheckLoginOnly
+    [switch]$CheckLoginOnly,
+    [switch]$NoExit
 )
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
@@ -43,7 +44,9 @@ function Test-SteamLogin {
     if (-not (Test-Path $vdf)) { return [pscustomobject]@{ Saved = $false; Account = $null } }
     $raw = Get-Content $vdf -Raw
     return [pscustomobject]@{
-        Saved = [bool]($raw -match '"RememberPassword"\s+"1"')
+        # QR sign-in writes AutoLogin instead of RememberPassword. Treat both
+        # forms exactly like preflight.ps1 and first-logon.ps1 do.
+        Saved = [bool]($raw -match '"(RememberPassword|AutoLogin)"\s+"1"')
         Account = ([regex]::Match($raw, '"AccountName"\s+"([^"]+)"')).Groups[1].Value
     }
 }
@@ -73,10 +76,19 @@ function Remove-SteamAutostart {
 $steam = Get-SteamPath
 
 if ($CheckLoginOnly) {
-    if (-not $steam) { Write-Host 'Steam is not installed.'; exit 1 }
+    if (-not $steam) {
+        Write-Host 'Steam is not installed.'
+        if ($NoExit) { $global:LASTEXITCODE = 1; return }
+        exit 1
+    }
     $login = Test-SteamLogin $steam
-    if ($login.Saved) { Write-Host "Saved login found (account: $($login.Account))."; exit 0 }
+    if ($login.Saved) {
+        Write-Host "Saved login found (account: $($login.Account))."
+        if ($NoExit) { $global:LASTEXITCODE = 0; return }
+        exit 0
+    }
     Write-Host 'Steam is installed but has no saved login.'
+    if ($NoExit) { $global:LASTEXITCODE = 1; return }
     exit 1
 }
 
@@ -163,7 +175,9 @@ $login = Test-SteamLogin $steam
 if ($login.Saved) {
     Write-Host ''
     Write-Host "Saved login found (account: $($login.Account)). Big Picture will open unattended." -ForegroundColor Green
-    exit 0
+    # This script is called in-process by install-frontend.ps1. exit would end
+    # the entire provisioning run after Steam, its very first package.
+    return
 }
 
 Write-Host ''
@@ -185,7 +199,9 @@ if ($LaunchForLogin) {
 
     # Steam re-adds its autostart entry when it runs
     Remove-SteamAutostart
-    exit 0
+    return
 }
 
-exit 1
+# A missing saved login is not an installation failure. Phase 2 signs in as the
+# console account and preflight blocks shell replacement until it is safe.
+return

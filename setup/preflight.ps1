@@ -14,7 +14,11 @@ param(
     [string]$UserName = 'gamer',
     [string]$ShellPath = 'C:\Program Files\Consolize\consolize.exe',
     [ValidateSet('steam', 'playnite', 'hydra', 'custom')] [string]$Frontend = 'steam',
-    [ValidateSet('registry', 'shelllauncher')] [string]$Method = 'registry'
+    [ValidateSet('registry', 'shelllauncher')] [string]$Method = 'registry',
+    # setup-console.ps1 and enable-shell-launcher.ps1 invoke this script in the
+    # same PowerShell process. A bare exit here terminates those parent scripts
+    # before they can enable the shell, so embedded callers opt into return.
+    [switch]$NoExit
 )
 $ErrorActionPreference = 'Continue'
 
@@ -317,7 +321,8 @@ which needs a mouse and blocks the frontend. Fix: .\quiet-machine.ps1
 '@
 }
 
-$admins = Get-LocalGroupMember -Group 'Administrators' -ErrorAction SilentlyContinue |
+$administratorsGroup = Get-LocalGroup -SID 'S-1-5-32-544' -ErrorAction SilentlyContinue
+$admins = Get-LocalGroupMember -Group $administratorsGroup.Name -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -notlike "*\$UserName" -and $_.ObjectClass -eq 'User' }
 if ($admins) {
     Write-Check PASS 'A second admin account exists' (($admins | ForEach-Object { $_.Name }) -join ', ')
@@ -348,6 +353,7 @@ if ($auto -and ($auto.PSObject.Properties.Name -contains 'DefaultPassword')) {
 Write-Host ''
 if ($script:failures -gt 0) {
     Write-Host "$($script:failures) blocking issue(s), $($script:warnings) warning(s). Fix the FAILs before replacing the shell." -ForegroundColor Red
+    if ($NoExit) { $global:LASTEXITCODE = 1; return }
     exit 1
 }
 if ($script:warnings -gt 0) {
@@ -355,4 +361,5 @@ if ($script:warnings -gt 0) {
 } else {
     Write-Host 'All clear. Safe to enable the shell.' -ForegroundColor Green
 }
+if ($NoExit) { $global:LASTEXITCODE = 0; return }
 exit 0

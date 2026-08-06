@@ -16,6 +16,8 @@ that only surface at run time and therefore reach the user first.
      is Int32 -2147483648. Arithmetic then goes negative and silently produces
      a wrong number rather than an error. This broke the CRC that generates
      Steam's shortcut ids.
+  7. A script containing exit called in-process without its -NoExit contract.
+     exit terminates the entire PowerShell host, not only the child script.
 
 Run it before committing:  pwsh -File scripts/check-scripts.ps1
 #>
@@ -166,6 +168,7 @@ foreach ($file in $scripts) {
 # --- 4. cross script parameter contracts ------------------------------------
 Write-Host 'Checking calls between scripts...'
 $declared = @{}
+$containsExit = @{}
 foreach ($file in $scripts) {
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$null, [ref]$null)
     $names = @()
@@ -183,6 +186,9 @@ foreach ($file in $scripts) {
         }
     }
     $declared[$file.Name] = $names
+    $containsExit[$file.Name] = [bool]$ast.Find({
+        param($node) $node -is [System.Management.Automation.Language.ExitStatementAst]
+    }, $true)
 }
 
 $common = @('Verbose', 'Debug', 'ErrorAction', 'WarningAction', 'InformationAction', 'ErrorVariable',
@@ -208,6 +214,17 @@ foreach ($file in $scripts) {
 
         $target = $match.Groups[1].Value
         if (-not $declared.ContainsKey($target)) { continue }
+
+        if ($containsExit[$target] -and $declared[$target] -contains 'NoExit') {
+            $usesNoExit = [bool]($command.CommandElements | Where-Object {
+                $_ -is [System.Management.Automation.Language.CommandParameterAst] -and
+                $_.ParameterName -eq 'NoExit'
+            })
+            if (-not $usesNoExit) {
+                Report $file.FullName $command.Extent.StartLineNumber 'embedded-exit' `
+                    "$target contains exit and must be called with -NoExit in-process"
+            }
+        }
 
         foreach ($element in $command.CommandElements) {
             if ($element -isnot [System.Management.Automation.Language.CommandParameterAst]) { continue }

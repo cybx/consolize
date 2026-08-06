@@ -52,7 +52,7 @@ if (-not (Test-Path $ShellPath)) { throw "Shell not found at $ShellPath. Run ins
 if (-not $SkipPreflight) {
     $preflight = Join-Path $PSScriptRoot 'preflight.ps1'
     if (Test-Path $preflight) {
-        & $preflight -UserName $UserName -ShellPath $ShellPath
+        & $preflight -UserName $UserName -ShellPath $ShellPath -Method $Method -NoExit
         if ($LASTEXITCODE -ne 0) {
             throw 'Preflight found blocking issues (above). Fix them, or re-run with -SkipPreflight if you know what you are doing.'
         }
@@ -90,6 +90,19 @@ stores the setting outside the user's hive, at the cost of desktop mode.)
     try {
         $key = Join-Path $hive 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
         if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
+        $previousShell = (Get-ItemProperty -Path $key -Name Shell -ErrorAction SilentlyContinue).Shell
+        $shellStateDir = Join-Path $env:ProgramData 'Consolize'
+        $shellState = Join-Path $shellStateDir "shell-before-$sid.json"
+        if (-not (Test-Path $shellState)) {
+            New-Item -ItemType Directory -Force -Path $shellStateDir | Out-Null
+            & icacls.exe $shellStateDir /inheritance:r /grant:r `
+                '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Could not protect $shellStateDir" }
+            [pscustomobject]@{
+                HadShell = [bool]($previousShell -and $previousShell -notmatch '(?i)(?:^|[\\/])consolize\.exe(?:\s|$|")')
+                PreviousShell = if ($previousShell -and $previousShell -notmatch '(?i)(?:^|[\\/])consolize\.exe(?:\s|$|")') { $previousShell } else { $null }
+            } | ConvertTo-Json | Set-Content $shellState -Encoding UTF8
+        }
         New-ItemProperty -Path $key -Name 'Shell' -Value $ShellPath -PropertyType String -Force | Out-Null
         Write-Host "Shell for '$UserName' set to $ShellPath"
         Write-Host '  (per-user: every other account still gets explorer.exe)'

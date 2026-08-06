@@ -46,13 +46,14 @@ medium integrity and cannot touch the system. Under off it was already at high
 integrity from the moment it launched.
 #>
 param(
-    [Parameter(Mandatory)] [string]$UserName,
+    [string]$UserName,
     [ValidateSet('off', 'quiet', 'prompt')] [string]$Mode = 'quiet',
     [switch]$Restore
 )
 $ErrorActionPreference = 'Stop'
 
 $policies = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+$administratorsGroup = Get-LocalGroup -SID 'S-1-5-32-544' -ErrorAction Stop
 
 function Set-Policy {
     param([string]$Name, [int]$Value)
@@ -61,23 +62,28 @@ function Set-Policy {
 }
 
 if ($Restore) {
-    Write-Host "Restoring Windows defaults and putting '$UserName' back to a standard account..."
+    Write-Host 'Restoring Windows elevation defaults...'
     Set-Policy 'EnableLUA' 1
     Set-Policy 'ConsentPromptBehaviorAdmin' 5
     Set-Policy 'PromptOnSecureDesktop' 1
-    Remove-LocalGroupMember -Group 'Administrators' -Member $UserName -ErrorAction SilentlyContinue
+    if ($UserName) {
+        Remove-LocalGroupMember -Group $administratorsGroup.Name -Member $UserName -ErrorAction SilentlyContinue
+        Write-Host "  '$UserName' is a standard account again"
+    }
     Write-Host ''
     Write-Host 'Done. Restart to apply. Anticheat games will need a keyboard the first time.'
     return
 }
 
+if ([string]::IsNullOrWhiteSpace($UserName)) { throw 'UserName is required unless -Restore is used.' }
+
 # Every mode needs this: without it Windows asks for a password instead of a
 # yes, and no gamepad can type one.
-if (Get-LocalGroupMember -Group 'Administrators' -ErrorAction SilentlyContinue |
+if (Get-LocalGroupMember -Group $administratorsGroup.Name -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -like "*\$UserName" }) {
     Write-Host "'$UserName' is already an administrator"
 } else {
-    Add-LocalGroupMember -Group 'Administrators' -Member $UserName -ErrorAction Stop
+    Add-LocalGroupMember -Group $administratorsGroup.Name -Member $UserName -ErrorAction Stop
     Write-Host "'$UserName' added to Administrators"
 }
 

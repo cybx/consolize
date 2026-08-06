@@ -15,8 +15,8 @@ internal sealed record BluetoothDeviceInfo(
 ///
 /// Uses the Win32 Bluetooth API (bthprops.cpl). Pairing goes through
 /// BluetoothAuthenticateDeviceEx with a callback that accepts Just Works and
-/// numeric comparison, which covers controllers and headsets. Devices that
-/// demand a typed passkey are reported as such instead of failing silently.
+/// asks the person to verify numeric comparison. Devices that demand a typed
+/// passkey are reported as such instead of failing silently.
 /// </summary>
 internal static class Bluetooth
 {
@@ -136,7 +136,9 @@ internal static class Bluetooth
 
     private static bool OnAuthentication(IntPtr param, ref BLUETOOTH_AUTHENTICATION_CALLBACK_PARAMS parameters)
     {
-        // Confirm the pairing for the methods a controller or headset uses.
+        // Just Works has nothing to compare. Numeric comparison only provides
+        // MITM protection if a person actually confirms the same digits on
+        // both devices; auto-accepting it defeats the protocol.
         var response = new BLUETOOTH_AUTHENTICATE_RESPONSE
         {
             bthAddressRemote = parameters.deviceInfo.Address,
@@ -144,10 +146,23 @@ internal static class Bluetooth
             negativeResponse = 0,
         };
 
-        if (parameters.authenticationMethod == AUTHENTICATION_METHOD.NumericComparison
-            || parameters.authenticationMethod == AUTHENTICATION_METHOD.JustWorks)
+        if (parameters.authenticationMethod == AUTHENTICATION_METHOD.NumericComparison)
         {
             response.numericCompNumericValueOrPasskey = parameters.Numeric_Value_Passkey;
+            var device = string.IsNullOrWhiteSpace(parameters.deviceInfo.szName)
+                ? FormatAddress(parameters.deviceInfo.Address)
+                : parameters.deviceInfo.szName;
+            var answer = MessageBox.Show(
+                $"Does {device} show this same number?\n\n{parameters.Numeric_Value_Passkey:D6}",
+                "Confirm Bluetooth pairing",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2);
+            if (answer != DialogResult.Yes) response.negativeResponse = 1;
+        }
+        else if (parameters.authenticationMethod == AUTHENTICATION_METHOD.JustWorks)
+        {
+            response.numericCompNumericValueOrPasskey = 0;
         }
         else
         {

@@ -54,7 +54,7 @@ function Install-Frontend {
     if ($Key -eq 'steam') {
         # Steam has its own script: CDN fallback when winget fails, signature
         # check, autostart removal and the saved-login verification.
-        & (Join-Path $PSScriptRoot 'install-steam.ps1')
+        & (Join-Path $PSScriptRoot 'install-steam.ps1') -NoExit
         return
     }
 

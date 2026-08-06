@@ -62,13 +62,15 @@ if ($KeepShell) {
     if ($UserName) {
         $targets += $UserName
     } else {
-        # whoever the setup was aiming at, then every enabled local account
+        # Use only evidence that identifies the Consolize account. Sweeping
+        # every enabled account could delete an unrelated custom shell.
         $answers = Join-Path $env:ProgramData 'Consolize\answers.json'
         if (Test-Path $answers) {
             try { $targets += (Get-Content $answers -Raw | ConvertFrom-Json).UserName } catch { }
         }
-        $targets += (Get-LocalUser -ErrorAction SilentlyContinue |
-            Where-Object { $_.Enabled } | Select-Object -ExpandProperty Name)
+        $winlogonUser = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' `
+            -Name DefaultUserName -ErrorAction SilentlyContinue).DefaultUserName
+        if ($winlogonUser) { $targets += $winlogonUser }
     }
 
     $done = @{}
@@ -79,7 +81,9 @@ if ($KeepShell) {
     }
     if ($done.Count -gt 0) {
         Write-Host "  custom shell removed for: $(($done.Keys | Sort-Object) -join ', ')"
-        Write-Host '  (everyone gets explorer.exe again at the next sign-in)'
+        Write-Host '  (those accounts get explorer.exe again at the next sign-in)'
+    } else {
+        Write-Warning '  could not identify the console account; pass -UserName to remove its per-user shell'
     }
 }
 

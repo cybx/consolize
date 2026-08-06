@@ -15,6 +15,8 @@
 
 <p align="center">
   <a href="#install">Install</a> ·
+  <a href="#what-the-installer-asks-you">Options</a> ·
+  <a href="#what-it-changes-on-your-machine">What it changes</a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="#quick-settings">Quick Settings</a> ·
   <a href="#a-media-centre-too">Media</a> ·
@@ -50,6 +52,86 @@ required reboots.
 | **Console-style Windows** | Quiet notifications, controlled updates, silent boot, gaming runtimes, power tuning and optional startup cleanup |
 | **SteaMidra integration** | Optionally installs the latest upstream Windows build and adds it to Steam automatically |
 | **Safe way back** | A separate administrator keeps its ordinary desktop; rescue and uninstall scripts restore the Windows experience |
+
+## What the installer asks you
+
+One interview, then it runs unattended across the reboots. Every answer has a
+default, so Enter all the way through is a working console.
+
+| | Options | Default |
+|---|---|---|
+| Console account name and password | any name; the password is never left blank | `gamer` |
+| Steam language, keyboard layout | any Steam language; layout is asked separately and never guessed from the language | english, current layout |
+| Launchers | Steam, Playnite, Hydra, or all | Steam |
+| Which one boots | steam / playnite / hydra | steam |
+| Windows updates | everything / security only / skip | everything |
+| Software | runtimes, GPU app, media players, Java, Git and 7-Zip, qBittorrent | the recommended set |
+| Media centre | Kodi, Jellyfin, Plex, Stremio, and streaming sites | kodi, jellyfin |
+| Defender | tune / disable entirely / leave alone | tune |
+| Power button | sleep / hibernate | sleep |
+| Elevation | quiet / off / prompt | quiet |
+| Firewall | quiet / off / leave alone | quiet |
+
+The only step that needs you afterwards is signing in to Steam, inside the
+console account, because Windows keeps that login per user and no administrator
+can do it on another account's behalf.
+
+## What it changes on your machine
+
+This replaces the Windows shell for one account and changes machine-wide
+settings, some of which reduce security. All of it is listed here rather than
+discovered later, and all of it is reversible with
+[`uninstall-console.ps1`](setup/uninstall-console.ps1).
+
+**The shell and the session**
+
+| Change | Why | Undo |
+|---|---|---|
+| The console account's `Winlogon\Shell` becomes `consolize.exe` | that account boots into the frontend instead of Explorer | `disable-shell-launcher.ps1` |
+| Autologon, password stored as an LSA secret | a console does not ask who you are | `set-autologon.ps1 -Remove` |
+| Windows logo, boot animation, error screens and boot menu timeout off | a console does not show you Windows on the way up | `boot-silent.ps1 -Restore` |
+| Sign-in screen hidden (only at the very end of a successful setup) | so a failure never hides the way back in | `rescue.ps1` |
+
+**Quiet**
+
+| Change | Why | Undo |
+|---|---|---|
+| Game Bar and Game DVR off, machine and user | the guide button belongs to Steam | `quiet-machine.ps1 -Restore` |
+| Notification toasts, tips, "finish setting up your device" off | nothing pops over a game | `quiet-user.ps1 -Restore` |
+| Lock screen, screen saver and startup sound off | a console never interrupts what is on screen | same |
+| Windows Update: installs at 04:00, never reboots under a session | it will not restart mid-film | `quiet-machine.ps1 -Restore` |
+| Touch keyboard auto-opens on text fields | there is no keyboard on the sofa | `quiet-user.ps1 -Restore` |
+| Desktop background becomes the console splash | the default picture breaks the illusion | same, though the old picture is not recorded |
+| Startup items removed (Run, RunOnce, Startup folders, logon tasks) | optional, backed up first, Windows' own entries untouched | `clean-startup.ps1 -Restore` |
+
+**Performance and power**
+
+| Change | Why | Undo |
+|---|---|---|
+| Hardware-accelerated GPU scheduling on, MMCSS tuned for games | measurable, and reversible | `tune-performance.ps1 -Restore` |
+| Reserved storage off (about 7 GB back) | space on a console SSD | same |
+| `-Aggressive` also disables Search, SysMain and DiagTrack | opt-in only | same |
+| Power button sleeps or hibernates, no password on wake, no core parking, screen never blanked | a television handles blanking; blanking drops HDMI | `power-console.ps1 -Restore`, which records the previous scheme first |
+
+It deliberately does **not** do the things most "optimisation" scripts do:
+`bcdedit useplatformclock`, disabling the pagefile, forcing timer resolution,
+Nagle edits, blanket debloat, disabling SSD defrag scheduling. Each of those
+either does nothing or causes the stutter it claims to fix, and the script says
+so on screen.
+
+**Security, and this is the part to read twice**
+
+| Change | What you lose | Undo |
+|---|---|---|
+| Defender: game folders excluded, scans only when idle | very little | `tune-defender.ps1 -Restore` |
+| Defender **disabled entirely**, if you choose it | real-time protection, and it needs you to switch off Tamper Protection by hand | same |
+| UAC `quiet`: administrators elevate without a prompt | anything running as the console account can gain administrator rights without asking you | `console-elevation.ps1 -Restore` |
+| UAC `off`: `EnableLUA = 0` | the above, plus everything runs elevated from the start, integrity levels included | same |
+| Firewall: inbound allowed on the private profile, notifications off | games stop asking, and so does Windows | `firewall-console.ps1 -Restore` |
+
+Reasonable for one person's console in a living room. Not for a machine other
+people use, and not for the only account of a work machine. Leaving Windows
+alone is one of the answers to every one of these questions.
 
 ## Before you install
 
@@ -309,7 +391,7 @@ cd 'C:\Program Files\Consolize\setup'
 ```
 
 It gets cover art and lands in the **Consolize** collection with the rest. The
-list lives in `C:\ProgramData\Consolize\extra-shortcuts.json`, so it is
+list lives in `C:\ProgramData\Consolize\shared\extra-shortcuts.json`, so it is
 reapplied on every update rather than being a one-off.
 
 Taking an app off the list does not remove it from the library: an entry that no
@@ -335,8 +417,9 @@ block.
 So this installs [VacuumTube](https://github.com/shy1132/VacuumTube), which
 wraps that same official interface in Electron, identifies as the YouTube TV app
 and implements controller input itself. MIT, actively maintained, not on winget,
-so it comes from its GitHub release. It gets a library entry like everything
-else.
+so its portable x64 archive comes from the upstream GitHub release, has its
+published SHA-256 digest verified, and is extracted machine-wide under
+`C:\Program Files\VacuumTube`. It gets a library entry like everything else.
 
 Sign in with **Settings > Link with TV code** rather than typing a password on a
 television.
@@ -347,7 +430,11 @@ The software interview offers [SteaMidra](https://github.com/Midrags/SFF) as an
 optional integration. Consolize resolves its latest upstream GitHub release at
 install time, downloads the Windows ZIP, extracts it with 7-Zip to
 `C:\Program Files\SteaMidra`, and adds **SteaMidra** to Steam as a non-Steam
-app. Run or update it on its own with:
+app. That library entry goes through Windows' elevation broker because SteaMidra
+requires administrator rights. With the default `quiet` elevation mode it opens
+without a prompt; `prompt` shows a controller-friendly Yes/No dialog. Steam
+keeps the entry marked as running until SteaMidra closes. Run or update it on
+its own with:
 
 ```powershell
 .\install-steamidra.ps1

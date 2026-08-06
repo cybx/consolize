@@ -1,4 +1,3 @@
-#Requires -RunAsAdministrator
 <#
 Turns the console into a media centre as well: your own library and the
 streaming services, both reachable from the Steam library with a controller.
@@ -35,22 +34,28 @@ param(
     # from half a metre away; a television is watched from three. 1.0 leaves
     # them at desktop size.
     [ValidateRange(1.0, 3.0)] [double]$Scale = 1.5,
+    [ValidateSet('all', 'machine', 'user')] [string]$Phase = 'all',
     [switch]$NonInteractive,
-    [switch]$NoShortcut
+    [switch]$NoShortcut,
+    [switch]$DeferApply
 )
 $ErrorActionPreference = 'Continue'
 
 $players = [ordered]@{
     kodi     = @{ Id = 'XBMCFoundation.Kodi'; Label = 'Kodi (the one that reads a gamepad natively)'
-                  Exe = @('%ProgramFiles%\Kodi\kodi.exe'); Glyph = 'E8B2'; Recommended = $true }
+                  Exe = @('%ProgramFiles%\Kodi\kodi.exe'); Glyph = 'E8B2'; Recommended = $true
+                  InstallPhase = 'machine'; Scope = $null }
     jellyfin = @{ Id = 'Jellyfin.JellyfinMediaPlayer'; Label = 'Jellyfin Media Player (your own server)'
-                  Exe = @('%ProgramFiles%\Jellyfin Media Player\JellyfinMediaPlayer.exe'); Glyph = 'E714'; Recommended = $true }
+                  Exe = @('%ProgramFiles%\Jellyfin\Jellyfin Media Player\JellyfinMediaPlayer.exe',
+                          '%ProgramFiles%\Jellyfin Media Player\JellyfinMediaPlayer.exe')
+                  Glyph = 'E714'; Recommended = $true
+                  InstallPhase = 'machine'; Scope = 'machine' }
     plex     = @{ Id = 'Plex.PlexHTPC'; Label = 'Plex HTPC'
-                  Exe = @('%ProgramFiles%\Plex\Plex HTPC\Plex HTPC.exe', '%LOCALAPPDATA%\Programs\Plex HTPC\Plex HTPC.exe')
-                  Glyph = 'E714'; Recommended = $false }
+                  Exe = @('%ProgramFiles%\Plex\Plex HTPC\Plex HTPC.exe')
+                  Glyph = 'E714'; Recommended = $false; InstallPhase = 'machine'; Scope = 'machine' }
     stremio  = @{ Id = 'Stremio.Stremio'; Label = 'Stremio'
-                  Exe = @('%ProgramFiles%\Stremio\stremio.exe', '%LOCALAPPDATA%\Programs\Stremio\stremio.exe')
-                  Glyph = 'E714'; Recommended = $false }
+                  Exe = @('%LOCALAPPDATA%\Programs\LNV\Stremio-4\stremio.exe')
+                  Glyph = 'E714'; Recommended = $false; InstallPhase = 'user'; Scope = 'user' }
 }
 
 $sites = [ordered]@{
@@ -101,26 +106,46 @@ if ($NonInteractive -and -not $Apps -and -not $Services) {
 }
 
 $shortcut = Join-Path $PSScriptRoot 'add-app-shortcut.ps1'
-$canShortcut = (Test-Path $shortcut) -and -not $NoShortcut
+$canShortcut = (Test-Path $shortcut) -and -not $NoShortcut -and $Phase -ne 'machine'
+$wingetExe = Get-Command winget.exe -CommandType Application -ErrorAction SilentlyContinue |
+    Select-Object -First 1 -ExpandProperty Source
+if (-not $wingetExe -and $Phase -ne 'machine') {
+    # App Installer may be provisioned for Windows but not registered in this
+    # newly-created console profile yet. Registration is per-user and does not
+    # require turning a user-scope install into an administrator install.
+    try {
+        Add-AppxPackage -RegisterByFamilyName `
+            -MainPackage 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe' -ErrorAction Stop
+    } catch { }
+    $wingetExe = Get-Command winget.exe -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1 -ExpandProperty Source
+}
 
 # --- the players -------------------------------------------------------------
 
 foreach ($key in $Apps) {
     $app = $players[$key]
+    $installHere = $Phase -eq 'all' -or $Phase -eq $app.InstallPhase
+    if (-not $installHere -and -not $canShortcut) { continue }
     Write-Host ''
     Write-Host ">> $($app.Label)..." -ForegroundColor Cyan
 
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    $exe = Resolve-Exe $app.Exe
+    if (-not $wingetExe -and -not $exe -and $installHere) {
         Write-Warning '  winget not available. Run bootstrap-gaming.ps1 first, it bootstraps winget.'
-        break
+        continue
     }
 
-    if (Resolve-Exe $app.Exe) {
+    if ($exe) {
         Write-Host '  already installed'
-    } else {
-        winget install --id $app.Id --source winget -e --silent `
-            --accept-package-agreements --accept-source-agreements
+    } elseif ($installHere) {
+        $wingetArgs = @('install', '--id', $app.Id, '--source', 'winget', '-e', '--silent',
+            '--accept-package-agreements', '--accept-source-agreements')
+        if ($app.Scope) { $wingetArgs += @('--scope', $app.Scope) }
+        & $wingetExe @wingetArgs
         if ($LASTEXITCODE -ne 0) { Write-Warning "  winget exited with $LASTEXITCODE" }
+    } else {
+        Write-Warning "  the machine-wide install did not produce $($app.Exe -join ' or ')"
     }
 
     $exe = Resolve-Exe $app.Exe
@@ -134,7 +159,7 @@ foreach ($key in $Apps) {
 
 # --- the services ------------------------------------------------------------
 
-if ($Services) {
+if ($Services -and $Phase -ne 'machine') {
     $edge = Resolve-Exe @(
         '%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe',
         '%ProgramFiles%\Microsoft\Edge\Application\msedge.exe'
@@ -148,8 +173,10 @@ if ($Services) {
             Write-Host ">> $($site.Label)..." -ForegroundColor Cyan
             # --app gives a window with no browser furniture, which is the whole
             # point on a television: no tabs, no address bar, no back button
-            # sitting over the film. A separate profile directory per service
-            # keeps each one signed in on its own.
+            # sitting over the film. Deliberately use the console user's normal
+            # Edge profile: provisioning is elevated under another account,
+            # and pinning --user-data-dir here would put logins in the wrong
+            # profile or create state the console user cannot update.
             #
             # The rest are the traps, and every one of them is something that
             # would only show up with a controller in hand and no keyboard:
@@ -167,9 +194,7 @@ if ($Services) {
             #                             small from three metres. Netflix's own
             #                             TV interface is far larger than its
             #                             web one; this closes some of the gap.
-            $profileDir = Join-Path $env:LOCALAPPDATA "Consolize\web\$key"
             $arguments = "--app=`"$($site.Url)`" --start-fullscreen" +
-                         " --user-data-dir=`"$profileDir`"" +
                          " --no-first-run --no-default-browser-check" +
                          " --disable-session-crashed-bubble --noerrdialogs" +
                          " --force-device-scale-factor=$Scale"
@@ -182,12 +207,12 @@ if ($Services) {
 # --- one rewrite at the end --------------------------------------------------
 # Each -NoApply above only recorded the entry. Applying once means Steam is
 # closed once rather than once per app.
-if ($canShortcut) {
+if ($canShortcut -and -not $DeferApply) {
     Write-Host ''
     & (Join-Path $PSScriptRoot 'add-console-shortcuts.ps1') -Force
 }
 
-if ($Services) {
+if ($Services -and $Phase -ne 'machine') {
     Write-Host ''
     Write-Host 'The streaming services need a controller layout, once.' -ForegroundColor Cyan
     Write-Host 'They are web pages, and a web page does not read a gamepad. That binding lives'

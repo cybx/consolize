@@ -50,7 +50,24 @@ $taskFinish = 'ConsolizeFinish'
 
 New-Item -ItemType Directory -Force -Path $stateDir, $logDir | Out-Null
 
+# answers.json and the scripts consumed by SYSTEM tasks must never inherit a
+# writable ProgramData ACL. Numeric well-known SIDs work on every Windows UI
+# language; names such as Administrators and Users do not.
+& icacls.exe $stateDir /inheritance:r /grant:r `
+    '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Could not protect the privileged state directory: $stateDir" }
+
 function Step { param([string]$Text) Write-Host ''; Write-Host "==> $Text" -ForegroundColor Cyan }
+
+function New-ConsolizePassword {
+    # A console rarely needs this password typed after setup, but it may become
+    # an administrator account. Never fall back to the public account name.
+    $alphabet = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+    $bytes = New-Object byte[] 20
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+    return 'Aa1!' + (-join @($bytes | ForEach-Object { $alphabet[$_ % $alphabet.Length] }))
+}
 
 function Write-FinishLog {
     param([string]$Message)
@@ -118,7 +135,7 @@ if ($Finish) {
     # With 2>&1 the log recorded "fix the issues above" and no issues.
     $frontend = if ($answers.BootInto) { $answers.BootInto } else { 'steam' }
     $finishMethod = if ($answers.ShellMethod) { $answers.ShellMethod } else { 'registry' }
-    $preflightOut = & (Join-Path $here 'preflight.ps1') -UserName $user -Frontend $frontend -Method $finishMethod *>&1
+    $preflightOut = & (Join-Path $here 'preflight.ps1') -UserName $user -Frontend $frontend -Method $finishMethod -NoExit *>&1
     $preflightOut | ForEach-Object { Write-FinishLog "  $_" }
     if ($LASTEXITCODE -ne 0) {
         Write-FinishLog 'preflight failed; NOT replacing the shell (this is the safe outcome)'
@@ -213,17 +230,17 @@ if ($Unattended) {
                 Write-Host ''
                 Write-Host '  An empty password does not work here: Windows stops at the logon' -ForegroundColor Yellow
                 Write-Host '  screen demanding one, and the console never logs itself in.' -ForegroundColor Yellow
-                Write-Host "  Type a password, or press Enter again to use '$UserName'." -ForegroundColor Yellow
+                Write-Host '  Type a password, or press Enter again to generate a strong one.' -ForegroundColor Yellow
                 $asked++
                 continue
             }
 
-            $userPassword = ConvertTo-SecureString $UserName -AsPlainText -Force
+            $generatedPassword = New-ConsolizePassword
+            $userPassword = ConvertTo-SecureString $generatedPassword -AsPlainText -Force
             Write-Host ''
-            Write-Host "  Using '$UserName' as the password." -ForegroundColor Yellow
-            Write-Host '  Worth knowing: it is as weak as it looks, so anyone at the keyboard can'
-            Write-Host '  sign in. Fine for a console on your TV, not for a machine on a desk'
-            Write-Host '  someone else uses. Change it any time with:'
+            Write-Host '  Generated a strong password. Save it now; it is shown only once:' -ForegroundColor Yellow
+            Write-Host "    $generatedPassword" -ForegroundColor Cyan
+            Write-Host '  Automatic logon stores it as an LSA secret. Change it any time with:'
             Write-Host "    Set-LocalUser -Name $UserName -Password (Read-Host -AsSecureString)"
             Write-Host "    .\set-autologon.ps1 -UserName $UserName"
             break
@@ -279,6 +296,21 @@ if ($Unattended) {
             security = 'security and critical only'
             skip = 'skip for now' }) 'all'
     $wantMedia = Ask-Yes 'Install VLC and mpv (play anything on the TV, no codec pack)?' $true
+    $wantYouTube = Ask-Yes 'Install VacuumTube (YouTube TV with controller support)?' $true
+    Write-Host '  HTPC apps: kodi, jellyfin, plex, stremio'
+    $htpcAnswer = Read-Host '  HTPC apps (comma list, Enter for kodi,jellyfin; "none" to skip)'
+    $htpcApps = if ([string]::IsNullOrWhiteSpace($htpcAnswer)) { @('kodi', 'jellyfin') }
+    elseif ($htpcAnswer.Trim() -eq 'none') { @() }
+    else {
+        @($htpcAnswer -split ',' | ForEach-Object { $_.Trim().ToLowerInvariant() } |
+            Where-Object { $_ -in @('kodi', 'jellyfin', 'plex', 'stremio') })
+    }
+    Write-Host '  Streaming shortcuts: netflix, primevideo, disney, max, globoplay, crunchyroll'
+    $servicesAnswer = Read-Host '  Services (comma list, Enter for none)'
+    $htpcServices = if ([string]::IsNullOrWhiteSpace($servicesAnswer)) { @() } else {
+        @($servicesAnswer -split ',' | ForEach-Object { $_.Trim().ToLowerInvariant() } |
+            Where-Object { $_ -in @('netflix', 'primevideo', 'disney', 'max', 'globoplay', 'crunchyroll') })
+    }
     $wantTools = Ask-Yes 'Install Git and 7-Zip?' $true
     $wantSteaMidra = Ask-Yes 'Install the latest SteaMidra and add it to Steam?' $true
     $wantTorrent = Ask-Yes 'Install qBittorrent and create a torrent folder layout?' $false
@@ -321,6 +353,9 @@ if ($Unattended) {
         BootInto    = $bootInto
         Updates     = $updates
         Media       = $wantMedia
+        YouTube     = $wantYouTube
+        HtpcApps    = $htpcApps
+        HtpcServices = $htpcServices
         Tools       = $wantTools
         SteaMidra   = $wantSteaMidra
         Torrent     = $wantTorrent
@@ -340,6 +375,8 @@ if ($Unattended) {
     Write-Host 'PLAN' -ForegroundColor Yellow
     Write-Host "  console account : $UserName$(if (-not $userExists) { ' (will be created)' })"
     Write-Host "  launchers       : $($launchers -join ', ')  ->  boots into $bootInto"
+    Write-Host "  HTPC apps       : $(if ($htpcApps.Count) { $htpcApps -join ', ' } else { 'none' })"
+    Write-Host "  TV shortcuts    : $(if ($htpcServices.Count) { $htpcServices -join ', ' } else { 'none' })"
     Write-Host "  updates         : $updates"
     Write-Host "  defender        : $defender"
     Write-Host "  services        : $(if ($aggressive) { 'trimmed' } else { 'untouched' })"
@@ -377,14 +414,15 @@ if (-not (Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue)) {
 
     $password = $script:newUserPassword
     if (-not $password -and -not $Unattended) {
-        $password = Read-Host "  password for $UserName (Enter to use '$UserName')" -AsSecureString
+        $password = Read-Host "  password for $UserName (Enter to generate a strong one)" -AsSecureString
     }
     # Resumed unattended, or the prompt came back empty: fall back to the account
-    # name rather than creating a passwordless account, which Windows treats as
-    # "must set a password at the next sign-in" and which breaks autologon.
+    # Generate rather than creating a passwordless or account-name password.
+    # On a resumed unattended run the plaintext is never printed or persisted;
+    # autologon receives the SecureString below in the same process.
     if (-not $password -or $password.Length -eq 0) {
-        $password = ConvertTo-SecureString $UserName -AsPlainText -Force
-        Write-Host "  no password given, using '$UserName'"
+        $password = ConvertTo-SecureString (New-ConsolizePassword) -AsPlainText -Force
+        Write-Host '  no password given, generated a strong one for autologon'
     }
 
     # Always with a password. A passwordless account is one Windows stops and
@@ -395,8 +433,10 @@ if (-not (Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue)) {
     # screen while every command and every doc says "gamer".
     New-LocalUser -Name $UserName -Password $password -FullName $UserName `
         -Description 'consolize console account' -PasswordNeverExpires | Out-Null
+    $script:newUserPassword = $password
 
-    Add-LocalGroupMember -Group 'Users' -Member $UserName -ErrorAction SilentlyContinue
+    $usersGroup = Get-LocalGroup -SID 'S-1-5-32-545' -ErrorAction Stop
+    Add-LocalGroupMember -Group $usersGroup.Name -Member $UserName -ErrorAction SilentlyContinue
     Write-Host "  '$UserName' created."
 }
 
@@ -408,7 +448,9 @@ if (-not (Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue)) {
 $account = Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue
 if ($account -and -not $account.PasswordLastSet) {
     $repair = $script:newUserPassword
-    if (-not $repair -or $repair.Length -eq 0) { $repair = ConvertTo-SecureString $UserName -AsPlainText -Force }
+    if (-not $repair -or $repair.Length -eq 0) {
+        $repair = ConvertTo-SecureString (New-ConsolizePassword) -AsPlainText -Force
+    }
     try {
         Set-LocalUser -Name $UserName -Password $repair -ErrorAction Stop
         $script:newUserPassword = $repair
@@ -428,7 +470,8 @@ if ($account -and $account.FullName -eq 'Console') {
     } catch { }
 }
 
-$otherAdmins = Get-LocalGroupMember -Group 'Administrators' -ErrorAction SilentlyContinue |
+$administratorsGroup = Get-LocalGroup -SID 'S-1-5-32-544' -ErrorAction Stop
+$otherAdmins = Get-LocalGroupMember -Group $administratorsGroup.Name -ErrorAction SilentlyContinue |
     Where-Object { $_.ObjectClass -eq 'User' -and $_.Name -notlike "*\$UserName" }
 if (-not $otherAdmins) {
     Write-Warning 'No second administrator account exists. That is the way back in if the console misbehaves.'
@@ -457,6 +500,8 @@ Step 'Windows updates, drivers, runtimes and apps'
 $selection = @('gpu', 'runtimes', 'frontends')
 if ($a.Updates -ne 'skip') { $selection = @('updates') + $selection }
 if ($a.Media) { $selection += 'media' }
+if ($a.YouTube) { $selection += 'youtube' }
+if (@($a.HtpcApps).Count -gt 0 -or @($a.HtpcServices).Count -gt 0) { $selection += 'htpc' }
 if ($a.Tools) { $selection += 'tools' }
 if ($a.SteaMidra) {
     # Its portable release is a ZIP extracted by 7-Zip.
@@ -469,8 +514,11 @@ if ($a.Torrent) { $selection += 'torrent' }
     -NonInteractive `
     -SkipNetFx3:$SkipNetFx3 `
     -Items $selection `
+    -ForUser $UserName `
     -UpdateScope $(if ($a.Updates -eq 'security') { 'security' } else { 'all' }) `
     -Launchers $a.Launchers `
+    -HtpcApps $a.HtpcApps `
+    -HtpcServices $a.HtpcServices `
     -BootInto $a.BootInto
 
 Step 'Quiet layer'
@@ -567,19 +615,36 @@ Remove-ConsolizeTasks
 # ProgramData hands BUILTIN\Users Write on everything below it, and answers.json
 # here is read by a SYSTEM task that acts on what it says. Drop inheritance and
 # put it back as read-only for ordinary users.
-icacls $stateDir /inheritance:r /grant 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' 'Users:(OI)(CI)RX' | Out-Null
+& icacls.exe $stateDir /inheritance:r /grant:r `
+    '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Could not protect $stateDir" }
 
 # The console account still has to write the "ready" marker, so grant exactly
 # one subfolder and nothing else.
 New-Item -ItemType Directory -Force -Path $sharedDir | Out-Null
-icacls $sharedDir /grant "${UserName}:(OI)(CI)M" | Out-Null
+$consoleSid = (Get-LocalUser -Name $UserName -ErrorAction Stop).SID.Value
+& icacls.exe $sharedDir /inheritance:r /grant:r `
+    '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' "*$consoleSid`:(OI)(CI)M" | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Could not grant '$UserName' access to $sharedDir" }
 Write-Host "  $UserName can write to $sharedDir (and nothing else here)"
 
 # Refuse to arm a SYSTEM task whose script a non-admin could rewrite.
+$trustedWriterSids = @(
+    'S-1-5-18',       # Local System
+    'S-1-5-32-544',   # Builtin Administrators
+    'S-1-3-0',        # Creator Owner
+    'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464' # TrustedInstaller
+)
 $scriptAcl = (Get-Acl $here).Access | Where-Object {
-    $_.FileSystemRights -match 'Write|Modify|FullControl' -and
-    $_.AccessControlType -eq 'Allow' -and
-    $_.IdentityReference -notmatch 'SYSTEM|Administrators|TrustedInstaller|CREATOR OWNER'
+    if ($_.FileSystemRights -notmatch 'Write|Modify|FullControl' -or
+        $_.AccessControlType -ne 'Allow') { return $false }
+    try {
+        $aceSid = $_.IdentityReference.Translate(
+            [System.Security.Principal.SecurityIdentifier]).Value
+    } catch {
+        return $true
+    }
+    return $trustedWriterSids -notcontains $aceSid
 }
 if ($scriptAcl) {
     throw @"

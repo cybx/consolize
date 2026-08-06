@@ -303,10 +303,14 @@ internal sealed class QuickSettingsForm : Form
         return RunCommand("powercfg.exe", $"/devicequery {query}")
             .Split('\n')
             .Select(line => line.Trim())
-            .Where(line => line.Length > 0 && !line.StartsWith("NONE", StringComparison.OrdinalIgnoreCase))
+            .Where(line => line.Length > 0 && !IsNoDeviceSentinel(line))
             .Distinct()
             .ToList();
     }
+
+    private static bool IsNoDeviceSentinel(string line) =>
+        new[] { "NONE", "NENHUM", "AUCUN", "KEINE", "NINGUNO", "NESSUNO", "GEEN", "BRAK" }
+            .Contains(line, StringComparer.OrdinalIgnoreCase);
 
     private static void RunElevated(string file, string arguments)
     {
@@ -336,7 +340,7 @@ internal sealed class QuickSettingsForm : Form
         _header.Text = "Network";
         SetStatus("A connects to a saved network");
 
-        // netsh can take seconds; never on the UI thread
+        // wlanapi can take a moment; never on the UI thread
         if (!_wifiLoaded)
         {
             _wifiLoaded = true;
@@ -362,8 +366,8 @@ internal sealed class QuickSettingsForm : Form
             var captured = profile;
             Add($"Connect to {profile}", () => RunInBackground(
                 $"connecting to {captured}...",
-                () => RunCommand("netsh", $"wlan connect name=\"{captured}\""),
-                _ => SetStatus($"asked Windows to connect to {captured}")));
+                () => Wifi.Connect(captured),
+                result => SetStatus(result.Message)));
         }
     }
 
@@ -382,14 +386,7 @@ internal sealed class QuickSettingsForm : Form
 
     private static List<string> LoadWifiProfiles()
     {
-        return RunCommand("netsh", "wlan show profiles")
-            .Split('\n')
-            .Where(line => line.Contains(':') && line.Contains("Profile", StringComparison.OrdinalIgnoreCase)
-                        && !line.Contains("Group", StringComparison.OrdinalIgnoreCase))
-            .Select(line => line.Split(':', 2)[1].Trim())
-            .Where(name => name.Length > 0)
-            .Distinct()
-            .ToList();
+        return Wifi.GetProfiles();
     }
 
     private static List<BluetoothDeviceInfo> LoadBluetooth(bool scan)

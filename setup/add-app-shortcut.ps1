@@ -7,7 +7,7 @@ is a mouse and a file browser, and a machine that boots into Big Picture has
 neither, so getting an app into the library means leaving the console to do it.
 This is the same thing from one command.
 
-The list lives in C:\ProgramData\Consolize\extra-shortcuts.json and is applied
+The list lives in C:\ProgramData\Consolize\shared\extra-shortcuts.json and is applied
 by add-console-shortcuts.ps1, so it survives updates and is reapplied whenever
 the entries are rewritten.
 
@@ -36,17 +36,23 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $stateDir = Join-Path $env:ProgramData 'Consolize'
-$extrasFile = Join-Path $stateDir 'extra-shortcuts.json'
+$sharedDir = Join-Path $stateDir 'shared'
+$extrasFile = Join-Path $sharedDir 'extra-shortcuts.json'
+$legacyExtrasFile = Join-Path $stateDir 'extra-shortcuts.json'
+New-Item -ItemType Directory -Force -Path $sharedDir | Out-Null
 
 function Get-Extras {
-    if (-not (Test-Path $extrasFile)) { return @() }
-    try { return @(Get-Content $extrasFile -Raw | ConvertFrom-Json) }
-    catch { Write-Warning "$extrasFile is not readable JSON, starting a new list."; return @() }
+    $source = if (Test-Path $extrasFile) { $extrasFile }
+              elseif (Test-Path $legacyExtrasFile) { $legacyExtrasFile }
+              else { $null }
+    if (-not $source) { return @() }
+    try { return @(Get-Content $source -Raw | ConvertFrom-Json) }
+    catch { Write-Warning "$source is not readable JSON, starting a new list."; return @() }
 }
 
 function Save-Extras {
     param($Items)
-    New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $sharedDir | Out-Null
     # -InputObject is deliberate. In Windows PowerShell 5.1, piping ,@($Items)
     # serializes the wrapper as { "value": [...], "Count": n } rather than as
     # a JSON array. The reader then sees one object with no name/exe and silently

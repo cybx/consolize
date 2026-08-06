@@ -72,8 +72,7 @@ if ($Restore) {
         if ($value -match '^\d+$') { bcdedit.exe /timeout $value | Out-Null; Write-Host "  boot menu timeout restored to $value" }
         Remove-Item $savedTimeout -Force -ErrorAction SilentlyContinue
     } else {
-        bcdedit.exe /timeout 30 | Out-Null
-        Write-Host '  boot menu timeout restored to the Windows default (30)'
+        Write-Host '  no saved boot timeout; leaving the current value unchanged'
     }
     Set-RegValue $winlogon 'EnableFirstLogonAnimation' 1
     Write-Host 'Restored. The logo and welcome screen come back on the next boot.'
@@ -107,18 +106,26 @@ bcdedit.exe /set '{current}' noerrordisplay on | Out-Null
 
 # Zeroing the boot menu timeout on a dual boot machine hides the other OS, so
 # only do it when Windows is the only entry, and record the old value first.
-$entries = (bcdedit.exe /enum osloader | Select-String -Pattern '^identifier' -AllMatches).Count
-if ($entries -le 1) {
-    $current = (bcdedit.exe /enum '{bootmgr}' | Select-String -Pattern 'timeout\s+(\d+)').Matches.Groups[1].Value
-    if ($current) {
+$osLoaderText = (bcdedit.exe /enum osloader) -join "`n"
+# Field labels are localized. The winload path is the stable signal that an
+# entry boots Windows, and failing to identify it must leave a dual-boot menu
+# alone rather than silently hiding another operating system.
+$entries = ([regex]::Matches($osLoaderText, '(?im)\\Windows\\system32\\winload\.(?:efi|exe)\s*$')).Count
+if ($entries -eq 1) {
+    $bootManagerText = (bcdedit.exe /enum '{bootmgr}') -join "`n"
+    $timeoutMatches = [regex]::Matches($bootManagerText, '(?m)^\s*\S+\s+(\d+)\s*$')
+    $current = if ($timeoutMatches.Count -eq 1) { $timeoutMatches[0].Groups[1].Value } else { $null }
+    if ($null -ne $current) {
         New-Item -ItemType Directory -Force -Path (Join-Path $env:ProgramData 'Consolize') | Out-Null
         Set-Content (Join-Path $env:ProgramData 'Consolize\boot-timeout.txt') $current -Encoding UTF8
+        bcdedit.exe /timeout 0 | Out-Null
+        Write-Host '  bcdedit: bootuxdisabled, quietboot, bootstatuspolicy, noerrordisplay, timeout 0'
+    } else {
+        Write-Warning '  could not read the current boot timeout safely; leaving it unchanged'
     }
-    bcdedit.exe /timeout 0 | Out-Null
-    Write-Host '  bcdedit: bootuxdisabled, quietboot, bootstatuspolicy, noerrordisplay, timeout 0'
 } else {
     Write-Host "  bcdedit: bootuxdisabled, quietboot, bootstatuspolicy, noerrordisplay"
-    Write-Host "  ($entries boot entries found, leaving the menu timeout alone so the other OS stays reachable)"
+    Write-Host "  ($entries Windows loader entries identified; leaving the menu timeout alone)"
 }
 
 # --- logon: no welcome screen, no status text --------------------------------

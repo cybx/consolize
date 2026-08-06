@@ -54,13 +54,6 @@ if ($Restore) {
 Write-Host 'Hardware-accelerated GPU Scheduling on...'
 Set-RegValue $gfxDrivers 'HwSchMode' 2
 
-# --- Game Mode ---------------------------------------------------------------
-# Keeps background work off the cores the game is using. Default on, but
-# people turn it off chasing myths, so pin it.
-Write-Host 'Game Mode on...'
-Set-RegValue 'HKCU:\SOFTWARE\Microsoft\GameBar' 'AllowAutoGameMode' 1
-Set-RegValue 'HKCU:\SOFTWARE\Microsoft\GameBar' 'AutoGameModeEnabled' 1
-
 # --- MMCSS "Games" profile ---------------------------------------------------
 # The Multimedia Class Scheduler reserves CPU for tasks that register as
 # multimedia. Games register under this profile; the defaults are conservative

@@ -11,7 +11,7 @@ Usage:
     .\set-autologon.ps1 -UserName gamer -Remove  # disables autologon
 #>
 param(
-    [Parameter(Mandatory)] [string]$UserName,
+    [string]$UserName,
     [string]$Domain = $env:COMPUTERNAME,
     # Passed by setup-console so the password is typed once for the whole setup.
     # Never a plain string: it stays a SecureString until the LSA call.
@@ -27,12 +27,13 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
+if (-not ('ConsolizeLsaSecret' -as [type])) {
 Add-Type -TypeDefinition @'
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 
-public static class LsaSecret
+public static class ConsolizeLsaSecret
 {
     [StructLayout(LayoutKind.Sequential)]
     private struct LSA_OBJECT_ATTRIBUTES
@@ -58,6 +59,9 @@ public static class LsaSecret
 
     [DllImport("advapi32.dll")]
     private static extern uint LsaStorePrivateData(IntPtr policy, ref LSA_UNICODE_STRING key, ref LSA_UNICODE_STRING data);
+
+    [DllImport("advapi32.dll", EntryPoint = "LsaStorePrivateData")]
+    private static extern uint LsaDeletePrivateData(IntPtr policy, ref LSA_UNICODE_STRING key, IntPtr data);
 
     [DllImport("advapi32.dll")]
     private static extern uint LsaNtStatusToWinError(uint status);
@@ -99,6 +103,38 @@ public static class LsaSecret
         }
     }
 
+    public static void Delete(string key)
+    {
+        var attrs = new LSA_OBJECT_ATTRIBUTES();
+        attrs.Length = Marshal.SizeOf(typeof(LSA_OBJECT_ATTRIBUTES));
+
+        IntPtr policy;
+        uint status = LsaOpenPolicy(IntPtr.Zero, ref attrs, POLICY_CREATE_SECRET, out policy);
+        if (status != 0) throw new Win32Exception((int)LsaNtStatusToWinError(status));
+
+        try
+        {
+            var k = MakeString(key);
+            try
+            {
+                status = LsaDeletePrivateData(policy, ref k, IntPtr.Zero);
+                if (status != 0)
+                {
+                    var error = LsaNtStatusToWinError(status);
+                    if (error != 2) throw new Win32Exception((int)error); // already absent is success
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(k.Buffer);
+            }
+        }
+        finally
+        {
+            LsaClose(policy);
+        }
+    }
+
     private static LSA_UNICODE_STRING MakeString(string s)
     {
         var us = new LSA_UNICODE_STRING();
@@ -109,15 +145,22 @@ public static class LsaSecret
     }
 }
 '@
+}
 
 $wl = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
 
 if ($Remove) {
     Set-ItemProperty $wl -Name AutoAdminLogon -Value '0' -Type String
-    [LsaSecret]::Store('DefaultPassword', '')
-    Remove-ItemProperty $wl -Name DefaultPassword -ErrorAction SilentlyContinue
+    [ConsolizeLsaSecret]::Delete('DefaultPassword')
+    foreach ($name in @('DefaultPassword', 'DefaultUserName', 'DefaultDomainName')) {
+        Remove-ItemProperty $wl -Name $name -ErrorAction SilentlyContinue
+    }
     Write-Host "Autologon disabled."
     return
+}
+
+if ([string]::IsNullOrWhiteSpace($UserName)) {
+    throw 'UserName is required unless -Remove is used.'
 }
 
 $secure = if ($Password -and $Password.Length -gt 0) { $Password }
@@ -126,7 +169,7 @@ $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
 try { $plain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
 finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
 
-[LsaSecret]::Store('DefaultPassword', $plain)
+[ConsolizeLsaSecret]::Store('DefaultPassword', $plain)
 
 Set-ItemProperty $wl -Name AutoAdminLogon -Value '1' -Type String
 Set-ItemProperty $wl -Name DefaultUserName -Value $UserName -Type String

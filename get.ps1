@@ -3,13 +3,13 @@ consolize one-line installer.
 
     irm https://get-consolize.cybx.dev | iex
 
-Downloads consolize.exe (latest release) plus the setup scripts, installs them
+Downloads consolize.exe (the release matching -Ref) plus the setup scripts, installs them
 to C:\Program Files\Consolize, and offers to run the provisioning right away.
 
 Options, when piping is not enough:
 
     & ([scriptblock]::Create((irm https://get-consolize.cybx.dev))) -DownloadOnly
-    & ([scriptblock]::Create((irm .../get.ps1))) -Ref v0.1.0
+    & ([scriptblock]::Create((irm .../get.ps1))) -Ref v0.11.0
 #>
 param(
     [string]$Repo = 'cybx/consolize',
@@ -119,19 +119,48 @@ Expand-Archive $srcZip -DestinationPath $tmp -Force
 $extracted = Get-ChildItem $tmp -Directory | Where-Object { $_.Name -like 'consolize-*' } | Select-Object -First 1
 if (-not $extracted) { throw 'Could not find the extracted source folder.' }
 
-# --- consolize.exe comes from the latest release; the source tree has no binary
-Write-Host 'Looking for the latest consolize.exe release...'
+# --- consolize.exe comes from the matching release; the source tree has no binary
+$releaseEndpoint = if ($Ref -eq 'main') {
+    "https://api.github.com/repos/$Repo/releases/latest"
+} elseif ($Ref -match '^v\d') {
+    "https://api.github.com/repos/$Repo/releases/tags/$([uri]::EscapeDataString($Ref))"
+} else {
+    $null
+}
+Write-Host $(if ($releaseEndpoint) { "Looking for a consolize.exe release matching '$Ref'..." }
+             else { "Ref '$Ref' is not a release tag; the binary will be built from that source when the .NET SDK is available." })
 $exeSource = $null
-try {
-    $rel = Invoke-RestMethod "https://api.github.com/repos/$Repo/releases/latest" -UseBasicParsing -Headers @{ 'User-Agent' = 'consolize-installer' }
-    $asset = $rel.assets | Where-Object { $_.name -eq 'consolize.exe' } | Select-Object -First 1
-    if ($asset) {
-        $exeSource = Join-Path $tmp 'consolize.exe'
-        Write-Host "  $($rel.tag_name)"
-        Invoke-WebRequest $asset.browser_download_url -OutFile $exeSource -UseBasicParsing
+if ($releaseEndpoint) {
+    try {
+        $rel = Invoke-RestMethod $releaseEndpoint -UseBasicParsing -Headers @{ 'User-Agent' = 'consolize-installer' }
+        $asset = $rel.assets | Where-Object { $_.name -eq 'consolize.exe' } | Select-Object -First 1
+        if ($asset) {
+            $exeSource = Join-Path $tmp 'consolize.exe'
+            Write-Host "  $($rel.tag_name)"
+            Invoke-WebRequest $asset.browser_download_url -OutFile $exeSource -UseBasicParsing
+
+            # GitHub records the digest when the release asset is uploaded.
+            # Refuse a truncated, substituted or stale proxy response rather
+            # than executing it as the shell on the next sign-in.
+            $assetDigest = [string]$asset.digest
+            $digestMatch = [regex]::Match($assetDigest, '^sha256:([0-9a-fA-F]{64})$')
+            if (-not $digestMatch.Success) {
+                Remove-Item $exeSource -Force -ErrorAction SilentlyContinue
+                $exeSource = $null
+                throw 'The release asset has no GitHub SHA-256 digest.'
+            }
+            $expectedHash = $digestMatch.Groups[1].Value.ToLowerInvariant()
+            $actualHash = (Get-FileHash $exeSource -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualHash -ne $expectedHash) {
+                Remove-Item $exeSource -Force -ErrorAction SilentlyContinue
+                $exeSource = $null
+                throw "consolize.exe digest mismatch (expected $expectedHash, got $actualHash)."
+            }
+            Write-Host "  SHA-256 verified by GitHub: $actualHash"
+        }
+    } catch {
+        Write-Warning "No usable matching release found ($($_.Exception.Message))."
     }
-} catch {
-    Write-Warning "No published release found ($($_.Exception.Message))."
 }
 
 if (-not $exeSource) {
@@ -149,6 +178,10 @@ if ($DownloadOnly) {
     Write-Host ("  setup scripts : " + (Get-ChildItem (Join-Path $extracted.FullName 'setup') -Filter *.ps1).Count + ' files')
     Write-Host ("  consolize.exe : " + $(if ($exeSource) { $exeSource } else { 'not available' }))
     return
+}
+
+if (-not $exeSource) {
+    throw "consolize.exe is unavailable for ref '$Ref'. No files were installed and provisioning will not be offered."
 }
 
 New-Item -ItemType Directory -Force -Path $ScriptDir | Out-Null
@@ -180,6 +213,9 @@ $splashSource = Join-Path $extracted.FullName 'assets\splash.png'
 if (Test-Path $splashSource) {
     $stateDir = Join-Path $env:ProgramData 'Consolize'
     New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
+    & icacls.exe $stateDir /inheritance:r /grant:r `
+        '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not protect $stateDir" }
     Copy-Item $splashSource (Join-Path $stateDir 'splash.png') -Force
     Write-Host "Boot splash installed to $stateDir\splash.png"
 }
@@ -211,9 +247,6 @@ if ($exeSource) {
         [Environment]::SetEnvironmentVariable('Path', "$machinePath;$InstallDir", 'Machine')
         Write-Host "  added to PATH (new shells only)"
     }
-} else {
-    Write-Warning 'consolize.exe is not installed. Setup scripts still work; grab the binary later from'
-    Write-Warning "https://github.com/$Repo/releases"
 }
 
 Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue

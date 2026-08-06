@@ -57,6 +57,13 @@ function Invoke-PowerCfg {
     }
 }
 
+function Get-ActivePowerScheme {
+    $activeText = (powercfg /getactivescheme) -join ' '
+    $activeMatch = [regex]::Match($activeText, '(?i)\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b')
+    if (-not $activeMatch.Success) { throw "Could not identify the active power scheme: $activeText" }
+    return $activeMatch.Value.ToLowerInvariant()
+}
+
 if ($ListWakeDevices) {
     Write-Host 'Devices allowed to wake this machine:'
     powercfg /devicequery wake_armed
@@ -74,8 +81,15 @@ if ($ListWakeDevices) {
 $stateFile = Join-Path $env:ProgramData 'Consolize\power-before.json'
 
 function Save-PowerState {
-    $active = ((powercfg /getactivescheme) -join ' ') -replace '.*GUID:\s*([0-9a-fA-F-]+).*', '$1'
-    $hibernateOn = ((powercfg /availablesleepstates) -join ' ') -match 'Hibernate'
+    if (Test-Path $stateFile) {
+        try { return Get-Content $stateFile -Raw | ConvertFrom-Json }
+        catch { throw "The saved power state is unreadable ($stateFile). Refusing to overwrite it." }
+    }
+
+    # Labels such as "Power Scheme GUID" and "Hibernate" are translated by
+    # Windows. UUIDs and hiberfil.sys are stable on every display language.
+    $active = Get-ActivePowerScheme
+    $hibernateOn = Test-Path (Join-Path $env:SystemDrive 'hiberfil.sys')
     $hiberboot = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' `
         -Name HiberbootEnabled -ErrorAction SilentlyContinue).HiberbootEnabled
 
@@ -83,15 +97,13 @@ function Save-PowerState {
         ActiveScheme   = $active
         HibernateWasOn = [bool]$hibernateOn
         HiberbootWas   = $hiberboot
+        StateVersion   = 2
+        ConsoleScheme  = $null
         SavedAt        = (Get-Date).ToString('o')
     }
     New-Item -ItemType Directory -Force -Path (Split-Path $stateFile) | Out-Null
-    # Written once. A second run would record the console's own settings as
-    # though they were the machine's, and then there is nothing to go back to.
-    if (-not (Test-Path $stateFile)) {
-        $state | ConvertTo-Json | Set-Content $stateFile
-        Write-Host "  previous power state recorded in $stateFile"
-    }
+    $state | ConvertTo-Json | Set-Content $stateFile
+    Write-Host "  previous power state recorded in $stateFile"
     return $state
 }
 
@@ -103,43 +115,52 @@ if ($Restore) {
         try { $before = Get-Content $stateFile -Raw | ConvertFrom-Json } catch { }
     }
 
-    # AC and DC both: a laptop or handheld keeps console behaviour on battery
-    # otherwise, while its owner believes power is back to normal.
-    foreach ($rail in @('setacvalueindex', 'setdcvalueindex')) {
-        Invoke-PowerCfg "/$rail" SCHEME_CURRENT SUB_BUTTONS PBUTTONACTION 3
-        Invoke-PowerCfg "/$rail" SCHEME_CURRENT SUB_BUTTONS SBUTTONACTION 1
-        Invoke-PowerCfg "/$rail" SCHEME_CURRENT SUB_BUTTONS LIDACTION 1
-        Invoke-PowerCfg "/$rail" SCHEME_CURRENT SUB_NONE CONSOLELOCK 1
-        Invoke-PowerCfg "/$rail" SCHEME_CURRENT SUB_SLEEP AWAYMODE 0
-        Invoke-PowerCfg "/$rail" SCHEME_CURRENT SUB_SLEEP RTCWAKE 1
-        # USB selective suspend back on
-        Invoke-PowerCfg "/$rail" SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 1
-    }
-    Invoke-PowerCfg /change monitor-timeout-ac 10
-    Invoke-PowerCfg /change standby-timeout-ac 30
-    Invoke-PowerCfg /change disk-timeout-ac 20
-    Invoke-PowerCfg /change hibernate-timeout-ac 180
-
-    $hiberboot = if ($before -and $null -ne $before.HiberbootWas) { $before.HiberbootWas } else { 1 }
-    Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' -Name HiberbootEnabled -Value $hiberboot
-
     if ($before) {
         if ($before.ActiveScheme) {
             Invoke-PowerCfg /setactive $before.ActiveScheme
+            if ((Get-ActivePowerScheme) -ne ([string]$before.ActiveScheme).ToLowerInvariant()) {
+                throw "Could not reactivate the original power scheme ($($before.ActiveScheme)); saved state was kept."
+            }
             Write-Host "  back on the power scheme that was active before ($($before.ActiveScheme))"
         }
-        if (-not $before.HibernateWasOn) {
+
+        # Version 1 changed the owner's active plan before creating the console
+        # plan. Repair those older installations with conservative Windows
+        # defaults. Version 2 never touches the original plan at all.
+        if (-not ($before.PSObject.Properties.Name -contains 'StateVersion')) {
+            foreach ($rail in @('setacvalueindex', 'setdcvalueindex')) {
+                Invoke-PowerCfg "/$rail" SCHEME_CURRENT SUB_BUTTONS PBUTTONACTION 3
+                Invoke-PowerCfg "/$rail" SCHEME_CURRENT SUB_BUTTONS SBUTTONACTION 1
+                Invoke-PowerCfg "/$rail" SCHEME_CURRENT SUB_BUTTONS LIDACTION 1
+                Invoke-PowerCfg "/$rail" SCHEME_CURRENT SUB_NONE CONSOLELOCK 1
+                Invoke-PowerCfg "/$rail" SCHEME_CURRENT SUB_SLEEP AWAYMODE 0
+                Invoke-PowerCfg "/$rail" SCHEME_CURRENT SUB_SLEEP RTCWAKE 1
+                Invoke-PowerCfg "/$rail" SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 1
+            }
+            Invoke-PowerCfg /change monitor-timeout-ac 10
+            Invoke-PowerCfg /change standby-timeout-ac 30
+            Invoke-PowerCfg /change disk-timeout-ac 20
+            Invoke-PowerCfg /change hibernate-timeout-ac 180
+            Write-Host '  repaired the original plan changed by an older Consolize version'
+        }
+
+        if ($before.HibernateWasOn) {
+            Invoke-PowerCfg /hibernate on
+        } else {
             # A full hiberfil.sys is the size of RAM. Leaving 32 GB of a 256 GB
             # console SSD spoken for, on a machine that never hibernated before,
             # is not a small thing to leave behind.
             Invoke-PowerCfg /hibernate off
             Write-Host '  hibernation off again, and hiberfil.sys released'
         }
-        # The duplicated Ultimate Performance scheme is this script's own
-        # creation, so it goes with it. Never the active one by this point.
-        $ultimateGuid = 'e9a42b02-d5df-448d-aa00-03f14749eb61'
-        if ($before.ActiveScheme -and $before.ActiveScheme -ne $ultimateGuid) {
-            Invoke-PowerCfg -delete $ultimateGuid
+        # Do this last: powercfg /hibernate may itself change Fast Startup.
+        $hiberboot = if ($null -ne $before.HiberbootWas) { $before.HiberbootWas } else { 1 }
+        Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' -Name HiberbootEnabled -Value $hiberboot
+
+        if (($before.PSObject.Properties.Name -contains 'ConsoleScheme') -and
+            $before.ConsoleScheme -and $before.ConsoleScheme -ne $before.ActiveScheme) {
+            Invoke-PowerCfg /delete $before.ConsoleScheme
+            Write-Host "  removed the Consolize-only power scheme ($($before.ConsoleScheme))"
         }
         Remove-Item $stateFile -Force -ErrorAction SilentlyContinue
     } else {
@@ -152,15 +173,64 @@ if ($Restore) {
     return
 }
 
-$null = Save-PowerState
+$before = Save-PowerState
+
+# Tune a private copy, never SCHEME_CURRENT while it still points to the owner's
+# plan. This is the difference between a reversible setup and merely guessing
+# Windows defaults during uninstall.
+$target = $null
+if (($before.PSObject.Properties.Name -contains 'ConsoleScheme') -and $before.ConsoleScheme) {
+    $knownSchemes = (powercfg /list) -join ' '
+    if ($knownSchemes -match [regex]::Escape([string]$before.ConsoleScheme)) {
+        $target = [string]$before.ConsoleScheme
+    }
+}
+
+if (-not $target) {
+    $uuidPattern = '(?i)\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b'
+    $bases = @(
+        'e9a42b02-d5df-448d-aa00-03f14749eb61', # Ultimate Performance template
+        '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c', # High Performance
+        [string]$before.ActiveScheme             # guaranteed final fallback
+    )
+    foreach ($base in $bases) {
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $duplicateOutput = & powercfg.exe -duplicatescheme $base 2>&1
+            $duplicateExit = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previous
+        }
+        $match = [regex]::Match(($duplicateOutput -join ' '), $uuidPattern)
+        if ($duplicateExit -eq 0 -and $match.Success) {
+            $target = $match.Value
+            break
+        }
+    }
+    if (-not $target) { throw 'Could not create an isolated Consolize power scheme.' }
+
+    Invoke-PowerCfg /changename $target 'Consolize Console'
+    if ($before.PSObject.Properties.Name -contains 'ConsoleScheme') {
+        $before.ConsoleScheme = $target
+    } else {
+        $before | Add-Member -NotePropertyName ConsoleScheme -NotePropertyValue $target
+    }
+    $before | ConvertTo-Json | Set-Content $stateFile
+}
+
+Invoke-PowerCfg /setactive $target
+if ((Get-ActivePowerScheme) -ne $target.ToLowerInvariant()) {
+    throw "Could not activate the private Consolize power scheme ($target); refusing to modify the owner's plan."
+}
 
 Write-Host "Rest mode: $RestMode"
 Write-Host '  power button, sleep button and Start menu power action'
-Invoke-PowerCfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS PBUTTONACTION $actionCode
-Invoke-PowerCfg /setdcvalueindex SCHEME_CURRENT SUB_BUTTONS PBUTTONACTION $actionCode
-Invoke-PowerCfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS SBUTTONACTION $actionCode
-Invoke-PowerCfg /setdcvalueindex SCHEME_CURRENT SUB_BUTTONS SBUTTONACTION $actionCode
-Invoke-PowerCfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION $actionCode
+foreach ($rail in @('setacvalueindex', 'setdcvalueindex')) {
+    Invoke-PowerCfg "/$rail" SCHEME_CURRENT SUB_BUTTONS PBUTTONACTION $actionCode
+    Invoke-PowerCfg "/$rail" SCHEME_CURRENT SUB_BUTTONS SBUTTONACTION $actionCode
+    Invoke-PowerCfg "/$rail" SCHEME_CURRENT SUB_BUTTONS LIDACTION $actionCode
+}
 
 if ($RestMode -eq 'Hibernate') {
     Write-Host '  hibernation file enabled (full size, so resume keeps the whole session)'
@@ -174,39 +244,26 @@ Invoke-PowerCfg /setdcvalueindex SCHEME_CURRENT SUB_NONE CONSOLELOCK 0
 
 Write-Host "Timeouts: screen $(if ($MonitorTimeout -eq 0) { 'never blanked (the TV handles that; blanking drops HDMI)' } else { "off after $MonitorTimeout min" }), sleep $(if ($SleepTimeout -eq 0) { 'never (movies and downloads keep running)' } else { "after $SleepTimeout min" })..."
 Invoke-PowerCfg /change monitor-timeout-ac $MonitorTimeout
+Invoke-PowerCfg /change monitor-timeout-dc $MonitorTimeout
 Invoke-PowerCfg /change standby-timeout-ac $SleepTimeout
+Invoke-PowerCfg /change standby-timeout-dc $SleepTimeout
 Invoke-PowerCfg /change disk-timeout-ac 0
+Invoke-PowerCfg /change disk-timeout-dc 0
 Invoke-PowerCfg /change hibernate-timeout-ac 0
+Invoke-PowerCfg /change hibernate-timeout-dc 0
 
 Write-Host 'Wake timers off (nothing wakes the TV at 3am)...'
 Invoke-PowerCfg /setacvalueindex SCHEME_CURRENT SUB_SLEEP RTCWAKE 0
+Invoke-PowerCfg /setdcvalueindex SCHEME_CURRENT SUB_SLEEP RTCWAKE 0
 
 Write-Host 'USB selective suspend off (wireless receivers stay responsive)...'
 Invoke-PowerCfg /setacvalueindex SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0
+Invoke-PowerCfg /setdcvalueindex SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0
 
 Write-Host 'Fast startup off (it is the usual suspect behind "the PC rebooted instead of resuming")...'
 Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' -Name HiberbootEnabled -Value 0
 
-# Ultimate Performance if the SKU exposes it, otherwise High Performance:
-# both stop core parking, which is what causes micro-stutter on some CPUs.
-$ultimate = 'e9a42b02-d5df-448d-aa00-03f14749eb61'
-$high = '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c'
-$schemes = (powercfg /list) -join "`n"
-# Modern Standby machines have no Ultimate Performance template, so this call
-# fails exactly where it is most likely to run. Invoke-PowerCfg tolerates that.
-if ($schemes -notmatch $ultimate) { Invoke-PowerCfg -duplicatescheme $ultimate }
-$schemes = (powercfg /list) -join "`n"
-$target = if ($schemes -match $ultimate) { $ultimate } else { $high }
-Write-Host "Active power scheme: $(if ($target -eq $ultimate) { 'Ultimate Performance' } else { 'High Performance' })"
-Invoke-PowerCfg /setactive $target
-
-# Re-apply on the newly active scheme, since SCHEME_CURRENT changed under us.
-Invoke-PowerCfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS PBUTTONACTION $actionCode
-Invoke-PowerCfg /setacvalueindex SCHEME_CURRENT SUB_NONE CONSOLELOCK 0
-Invoke-PowerCfg /setacvalueindex SCHEME_CURRENT SUB_SLEEP RTCWAKE 0
-Invoke-PowerCfg /change monitor-timeout-ac $MonitorTimeout
-Invoke-PowerCfg /change standby-timeout-ac $SleepTimeout
-Invoke-PowerCfg /setactive SCHEME_CURRENT
+Write-Host "Active power scheme: Consolize Console ($target)"
 
 Write-Host ''
 Write-Host 'Wake sources right now:'

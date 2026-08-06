@@ -50,6 +50,8 @@ param(
     [switch]$NonInteractive,
     [ValidateSet('steam', 'playnite', 'hydra', 'all')] [string[]]$Launchers,
     [ValidateSet('steam', 'playnite', 'hydra')] [string]$BootInto,
+    [ValidateSet('kodi', 'jellyfin', 'plex', 'stremio')] [string[]]$HtpcApps,
+    [ValidateSet('netflix', 'primevideo', 'disney', 'max', 'globoplay', 'crunchyroll')] [string[]]$HtpcServices,
     # NetFx3 pulls ~250 MB from Windows Update and only matters to older
     # launchers, so it is the one runtime worth being able to leave out.
     [switch]$SkipNetFx3
@@ -57,7 +59,10 @@ param(
 $ErrorActionPreference = 'Stop'
 
 function Test-Winget {
-    return [bool](Get-Command winget -ErrorAction SilentlyContinue)
+    $command = Get-Command winget.exe -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($command) { $script:WingetExe = $command.Source }
+    return [bool]$script:WingetExe
 }
 
 function Ensure-Winget {
@@ -105,7 +110,7 @@ function Ensure-Winget {
     if (-not (Test-Winget)) {
         # freshly registered store apps sometimes need the WindowsApps shim path
         $shim = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\winget.exe'
-        if (Test-Path $shim) { Set-Alias -Name winget -Value $shim -Scope Script }
+        if (Test-Path $shim) { $script:WingetExe = $shim }
     }
     if (-not (Test-Winget)) {
         throw 'Could not install winget automatically. Install "App Installer" from https://aka.ms/getwinget and re-run.'
@@ -119,11 +124,11 @@ function Ensure-Winget {
 # cover, and the prompt stops an otherwise automatic install dead.
 function Initialize-Winget {
     if ($script:WingetReady) { return }
-    & winget list --source winget --accept-source-agreements *>$null
+    & $script:WingetExe list --source winget --accept-source-agreements *>$null
     # Windows PowerShell 5.1 promotes merged native stderr to a terminating
     # NativeCommandError under EAP Stop. winget help normally uses stdout, and
     # losing a diagnostic line only means using the older compatible flags.
-    $help = (& winget install --help 2>$null) -join ' '
+    $help = (& $script:WingetExe install --help 2>$null) -join ' '
     $script:WingetInteractiveFlag = if ($help -match 'disable-interactivity') { @('--disable-interactivity') } else { @() }
     $script:WingetReady = $true
 }
@@ -135,7 +140,10 @@ function Install-FirstAvailable {
     $common = @('--source', 'winget', '-e', '--silent',
                 '--accept-package-agreements', '--accept-source-agreements') + $script:WingetInteractiveFlag
     foreach ($id in $Ids) {
-        winget install --id $id @common
+        # Invoke the resolved executable directly. A freshly repaired App
+        # Installer can expose an execution alias that PowerShell 5.1 expands
+        # incorrectly, passing winget.exe's own path as its first subcommand.
+        & $script:WingetExe install --id $id @common
         if ($LASTEXITCODE -eq 0) { return }
         Write-Warning "$Label ($id): winget exited with $LASTEXITCODE, trying next candidate (or it is already installed)."
     }
@@ -283,8 +291,15 @@ foreach ($key in $selected) {
             # itself, and half of it is not a winget id at all.
             $htpc = Join-Path $PSScriptRoot 'install-htpc.ps1'
             if (Test-Path $htpc) {
-                $arguments = @{}
-                if ($NonInteractive) { $arguments.NonInteractive = $true }
+                # Install only machine-wide players in the elevated phase.
+                # Stremio and every Edge shortcut belong to the real console
+                # profile and are completed by first-logon.ps1.
+                $arguments = @{ Phase = 'machine'; NoShortcut = $true }
+                if ($HtpcApps) { $arguments.Apps = $HtpcApps }
+                if ($HtpcServices) { $arguments.Services = $HtpcServices }
+                if ($NonInteractive -and -not $HtpcApps -and -not $HtpcServices) {
+                    $arguments.NonInteractive = $true
+                }
                 try { & $htpc @arguments } catch { Write-Warning "Media centre: $($_.Exception.Message)" }
             } else {
                 Write-Warning 'install-htpc.ps1 is not here, skipping.'

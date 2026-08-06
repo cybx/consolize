@@ -5,7 +5,9 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <RootNamespace>Consolize.SessionManager</RootNamespace>
     <AssemblyName>consolize</AssemblyName>
-    <Version>0.1.0</Version>
+    <!-- Release workflow overrides this with the pushed tag. Main is the next
+         development line, and Program.cs reads this instead of hardcoding it. -->
+    <Version>0.11.0-dev</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- the boot splash: Windows' own logo is switched off, so this is what

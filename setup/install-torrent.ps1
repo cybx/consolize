@@ -48,6 +48,16 @@ foreach ($name in $folders.Keys | Sort-Object) {
     Write-Host "  $($folders[$name])"
 }
 
+# Phase 2 reads this protected machine state and writes qBittorrent.ini from
+# inside the real console profile. Never pre-create C:\Users\<name>: doing so
+# before Windows creates the profile can force it into a suffixed directory.
+$torrentState = Join-Path $env:ProgramData 'Consolize\torrent-path.txt'
+New-Item -ItemType Directory -Force -Path (Split-Path $torrentState) | Out-Null
+& icacls.exe (Split-Path $torrentState) /inheritance:r /grant:r `
+    '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Could not protect $(Split-Path $torrentState)" }
+Set-Content $torrentState $TorrentPath -Encoding UTF8
+
 if ($FoldersOnly) { return }
 
 if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
@@ -67,7 +77,10 @@ if ($LASTEXITCODE -ne 0) { Write-Warning "winget exited with $LASTEXITCODE (qBit
 $appData = if ($ForUser) {
     $profileDir = (Get-CimInstance Win32_UserProfile |
         Where-Object { $_.LocalPath -like "*\$ForUser" } | Select-Object -First 1).LocalPath
-    if (-not $profileDir) { $profileDir = Join-Path $env:SystemDrive "Users\$ForUser" }
+    if (-not $profileDir) {
+        Write-Warning "$ForUser has no Windows profile yet. The folders and app are ready; phase 2 will configure qBittorrent after its first sign-in."
+        return
+    }
     Join-Path $profileDir 'AppData\Roaming'
 } else {
     $env:APPDATA

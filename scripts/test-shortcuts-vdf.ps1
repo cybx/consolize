@@ -13,10 +13,13 @@ Steam patched out, so the Steam on this machine is never touched.
   pwsh -File scripts/test-shortcuts-vdf.ps1
 #>
 $ErrorActionPreference = 'Stop'
-$root = Join-Path $env:TEMP 'consolize-vdf-test'
-Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
+$root = Join-Path $env:TEMP ("consolize-vdf-test-{0}-{1}" -f $PID, [guid]::NewGuid().ToString('N'))
 $fakeSteam = Join-Path $root 'Steam'
 New-Item -ItemType Directory -Force -Path (Join-Path $fakeSteam 'userdata\7777777\config') | Out-Null
+$fakeDesktop = Join-Path $root 'Desktop'
+New-Item -ItemType Directory -Force -Path $fakeDesktop | Out-Null
+$fakeState = Join-Path $root 'ProgramData\Consolize'
+New-Item -ItemType Directory -Force -Path $fakeState | Out-Null
 Set-Content (Join-Path $fakeSteam 'steam.exe') 'stub'
 $exe = Join-Path $root 'consolize.exe'
 New-Item -ItemType Directory -Force -Path $root | Out-Null
@@ -26,6 +29,18 @@ Set-Content $exe 'stub'
 $src = Get-Content (Join-Path (Split-Path -Parent $PSScriptRoot) 'setup\add-console-shortcuts.ps1') -Raw
 $patched = $src -replace '(?s)function Get-SteamPath \{.*?\n\}', "function Get-SteamPath { return `$env:FAKE_STEAM }"
 if ($patched -eq $src) { throw 'patch of Get-SteamPath did not apply' }
+# The production script also writes a desktop shortcut. Keep that inside the
+# throwaway tree: a test must never overwrite or delete the developer's real
+# "Back to Console Mode.lnk".
+$before = $patched
+$patched = $patched -replace '\$desktop = \[Environment\]::GetFolderPath\(''Desktop''\)', '$desktop = $env:FAKE_DESKTOP'
+if ($patched -eq $before) { throw 'patch of the Desktop path did not apply' }
+$before = $patched
+$patched = $patched -replace '\$extrasFile = Join-Path \$env:ProgramData ''Consolize\\shared\\extra-shortcuts\.json''', '$extrasFile = Join-Path $env:FAKE_STATE ''shared\extra-shortcuts.json'''
+if ($patched -eq $before) { throw 'patch of the extra-shortcuts path did not apply' }
+$before = $patched
+$patched = $patched -replace '\$legacyExtrasFile = Join-Path \$env:ProgramData ''Consolize\\extra-shortcuts\.json''', '$legacyExtrasFile = Join-Path $env:FAKE_STATE ''legacy-extra-shortcuts.json'''
+if ($patched -eq $before) { throw 'patch of the legacy extra-shortcuts path did not apply' }
 # never touch the Steam running on this machine
 $before = $patched
 $patched = $patched -replace '\$steamProc = Get-Process steam[^\r\n]*', '$steamProc = $null'
@@ -33,6 +48,8 @@ if ($patched -eq $before) { throw 'patch of the Steam process check did not appl
 $script = Join-Path $root 'under-test.ps1'
 Set-Content $script $patched
 $env:FAKE_STEAM = $fakeSteam
+$env:FAKE_DESKTOP = $fakeDesktop
+$env:FAKE_STATE = $fakeState
 $vdf = Join-Path $fakeSteam 'userdata\7777777\config\shortcuts.vdf'
 
 # an independent parser, written from the format description rather than from
@@ -232,7 +249,7 @@ Check 'only the game is left' ($got.Count -eq 1 -and $got[0].AppName -eq 'Cyberp
 Check 'the artwork went with them' ((Get-ChildItem $grid -Filter '*.png').Count -eq 0) `
     "$((Get-ChildItem $grid -Filter '*.png').Count) file(s) left"
 Check 'the desktop shortcut is gone' (
-    -not (Test-Path (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Back to Console Mode.lnk'))) 'still there'
+    -not (Test-Path (Join-Path $fakeDesktop 'Back to Console Mode.lnk'))) 'still there'
 & $script -ConsolizeExe $exe -Force -Remove 2>&1 | Out-Null
 $got = Parse-Vdf ([IO.File]::ReadAllBytes($vdf))
 Check 'removing twice is harmless' ($got.Count -eq 1) "got $($got.Count)"
@@ -252,17 +269,18 @@ Write-Host "`n13. an app the owner added gets an entry, artwork and the collecti
 # Steam can add a non-Steam game itself, but that needs a mouse and a file
 # browser, which is exactly what a machine booting into Big Picture does not
 # have. The list is a file instead.
-$extrasDir = Join-Path $env:ProgramData 'Consolize'
-$extrasFile = Join-Path $extrasDir 'extra-shortcuts.json'
-$extrasBackup = "$extrasFile.testbackup"
-$hadExtras = Test-Path $extrasFile
-if ($hadExtras) { Move-Item $extrasFile $extrasBackup -Force }
+$extrasDir = $fakeState
+$extrasFile = Join-Path $extrasDir 'shared\extra-shortcuts.json'
 try {
     $someApp = Join-Path $root 'SomeApp.exe'
     $someArtwork = Join-Path (Split-Path -Parent $PSScriptRoot) 'assets\splash.png'
     Set-Content $someApp 'stub'
-    New-Item -ItemType Directory -Force -Path $extrasDir | Out-Null
-    $addApp = Join-Path (Split-Path -Parent $PSScriptRoot) 'setup\add-app-shortcut.ps1'
+    New-Item -ItemType Directory -Force -Path (Split-Path $extrasFile) | Out-Null
+    $addAppSource = Get-Content (Join-Path (Split-Path -Parent $PSScriptRoot) 'setup\add-app-shortcut.ps1') -Raw
+    $addAppPatched = $addAppSource -replace '\$stateDir = Join-Path \$env:ProgramData ''Consolize''', '$stateDir = $env:FAKE_STATE'
+    if ($addAppPatched -eq $addAppSource) { throw 'patch of add-app-shortcut state path did not apply' }
+    $addApp = Join-Path $root 'add-app-under-test.ps1'
+    Set-Content $addApp $addAppPatched
     & $addApp -Name 'RetroArch' -Exe $someApp -Arguments '--fullscreen' `
         -Artwork $someArtwork -NoApply | Out-Null
     $savedExtras = @(Get-Content $extrasFile -Raw | ConvertFrom-Json)
@@ -307,9 +325,28 @@ try {
     Check 'an app that is not installed is skipped' ($got.AppName -notcontains 'Ghost') "$($got.AppName -join ', ')"
 } finally {
     Remove-Item $extrasFile -Force -ErrorAction SilentlyContinue
-    if ($hadExtras) { Move-Item $extrasBackup $extrasFile -Force }
+}
+
+Write-Host "`n14. the old ProgramData shortcut list migrates without losing apps"
+$legacyExtras = Join-Path $extrasDir 'extra-shortcuts.json'
+$legacyExe = Join-Path $root 'LegacyApp.exe'
+Set-Content $legacyExe 'stub'
+ConvertTo-Json -InputObject @([pscustomobject]@{
+    name = 'Legacy App'; exe = $legacyExe; args = ''; glyph = ''; artwork = ''
+}) -Depth 4 | Set-Content $legacyExtras
+try {
+    & $addApp -Name 'New App' -Exe $someApp -NoApply | Out-Null
+    # No @(): PowerShell 5.1 already returns the JSON array as one Object[];
+    # wrapping it would make an array whose only member is that array.
+    $migrated = Get-Content $extrasFile -Raw | ConvertFrom-Json
+    Check 'legacy and new entries are both in the protected shared list' `
+        ($migrated.Count -eq 2 -and $migrated.name -contains 'Legacy App' -and $migrated.name -contains 'New App') `
+        (($migrated | Select-Object -ExpandProperty name) -join ', ')
+} finally {
+    Remove-Item $extrasFile, $legacyExtras -Force -ErrorAction SilentlyContinue
 }
 
 Write-Host ''
+Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
 if ($fail) { Write-Host "$fail check(s) failed" -ForegroundColor Red; exit 1 }
 Write-Host 'all checks passed' -ForegroundColor Green

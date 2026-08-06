@@ -74,9 +74,13 @@ function Get-StartupItems {
     foreach ($t in Get-ScheduledTask -ErrorAction SilentlyContinue) {
         if ($t.TaskPath -like '\Microsoft\*') { continue }   # Windows' own plumbing
         if ($t.State -eq 'Disabled') { continue }
-        $trigger = $t.Triggers | Where-Object {
-            $_.CimClass.CimClassName -in @('MSFT_TaskLogonTrigger', 'MSFT_TaskBootTrigger')
-        }
+        # A logon task is user-facing even when its definition is stored
+        # machine-wide. During phase 1, -MachineOnly must not disable the
+        # administrator's VPN/password-manager/updater tasks. The console
+        # account's HKCU startup is cleaned later in its own session.
+        $triggerTypes = if ($MachineOnly) { @('MSFT_TaskBootTrigger') }
+                        else { @('MSFT_TaskLogonTrigger', 'MSFT_TaskBootTrigger') }
+        $trigger = $t.Triggers | Where-Object { $_.CimClass.CimClassName -in $triggerTypes }
         if (-not $trigger) { continue }
         $items.Add([pscustomobject]@{
             Type = 'ScheduledTask'; Location = $t.TaskPath; Name = $t.TaskName

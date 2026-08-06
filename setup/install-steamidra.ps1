@@ -49,6 +49,19 @@ if ($installed -and $installedVersion -eq $release.tag_name) {
     Write-Host "  downloading $($release.tag_name), $([math]::Round($asset.size / 1MB)) MB..."
     try {
         Invoke-WebRequest $asset.browser_download_url -OutFile $download -UseBasicParsing
+
+        $assetDigest = [string]$asset.digest
+        $digestMatch = [regex]::Match($assetDigest, '^sha256:([0-9a-fA-F]{64})$')
+        if (-not $digestMatch.Success) {
+            throw 'GitHub did not provide a SHA-256 digest for the SteaMidra archive.'
+        }
+        $expectedHash = $digestMatch.Groups[1].Value.ToLowerInvariant()
+        $actualHash = (Get-FileHash $download -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actualHash -ne $expectedHash) {
+            throw "SteaMidra digest mismatch (expected $expectedHash, got $actualHash)."
+        }
+        Write-Host "  SHA-256 verified by GitHub: $actualHash"
+
         New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
         Write-Host "  extracting with 7-Zip to $installDir..."
@@ -84,6 +97,18 @@ if (-not (Test-Path $shortcut)) {
 }
 
 Write-Host ''
-$shortcutArgs = @{ Name = 'SteaMidra'; Exe = $installed.FullName; Glyph = 'E7FC' }
+$elevatedLauncher = Join-Path $PSScriptRoot 'launch-elevated.ps1'
+if (-not (Test-Path $elevatedLauncher)) {
+    throw "launch-elevated.ps1 is missing next to this script; refusing to add a shortcut that may fail elevation."
+}
+$powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$launcherArguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass ' +
+    "-File `"$elevatedLauncher`" -Executable `"$($installed.FullName)`""
+$shortcutArgs = @{
+    Name = 'SteaMidra'
+    Exe = $powershell
+    Arguments = $launcherArguments
+    Glyph = 'E7FC'
+}
 if (Test-Path $artwork -PathType Leaf) { $shortcutArgs['Artwork'] = $artwork }
 & $shortcut @shortcutArgs

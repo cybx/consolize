@@ -72,7 +72,18 @@ try {
 # console. setup-console.ps1 grants this account write access to that folder.
 $readyMarker = Join-Path $env:ProgramData 'Consolize\shared\account-ready'
 
-if (Test-Path $marker) { return }
+if (Test-Path $marker) {
+    # setup-console.ps1 deliberately removes the shared marker when a new run
+    # starts. Recreate it even when this account already completed phase 2, or
+    # the SYSTEM finish task waits for an hour for work that is already done.
+    try {
+        New-Item -ItemType Directory -Force -Path (Split-Path $readyMarker) | Out-Null
+        Set-Content -Path $readyMarker -Value $env:USERNAME -Encoding ASCII
+    } catch {
+        Write-Warning "Could not refresh the ready marker: $($_.Exception.Message)"
+    }
+    return
+}
 
 Write-Host ''
 Write-Host '  consolize: finishing this account' -ForegroundColor Cyan
@@ -109,6 +120,28 @@ $answersPath = Join-Path $env:ProgramData 'Consolize\answers.json'
 if (Test-Path $answersPath) {
     try { $answers = Get-Content $answersPath -Raw | ConvertFrom-Json }
     catch { Write-Warning "Could not read $answersPath, assuming defaults." }
+}
+
+# locale-console.ps1 runs elevated in phase 1, where HKCU belongs to the
+# administrator. Apply the requested language and physical keyboard again here,
+# in the actual console account, before it has to type a Steam password.
+if ($answers -and $answers.Language) {
+    try {
+        $currentTips = (Get-WinUserLanguageList | Select-Object -First 1).InputMethodTips
+        $languageList = New-WinUserLanguageList -Language $answers.Language
+        if ($answers.Keyboard) {
+            $languageList[0].InputMethodTips.Clear()
+            $languageList[0].InputMethodTips.Add([string]$answers.Keyboard)
+        } elseif ($currentTips) {
+            $languageList[0].InputMethodTips.Clear()
+            foreach ($tip in $currentTips) { $languageList[0].InputMethodTips.Add($tip) }
+        }
+        Set-WinUserLanguageList $languageList -Force
+        Set-Culture -CultureInfo $answers.Language -ErrorAction SilentlyContinue
+        Write-Host "==> Account language and keyboard: $($answers.Language)" -ForegroundColor Cyan
+    } catch {
+        Write-Warning "Could not apply this account's language/keyboard: $($_.Exception.Message)"
+    }
 }
 
 $steamEarly = Get-SteamPathEarly
@@ -159,6 +192,53 @@ if (Test-Path $quietUser) {
     & $quietUser
 } else {
     Write-Warning "quiet-user.ps1 not found next to this script ($here)."
+}
+
+# qBittorrent is installed machine-wide in phase 1, but its paths are per user.
+# Create them here, after Windows has created the genuine profile directory.
+$torrentState = Join-Path $env:ProgramData 'Consolize\torrent-path.txt'
+if (Test-Path $torrentState) {
+    try {
+        $torrentRoot = (Get-Content $torrentState -Raw).Trim()
+        $torrentIni = Join-Path $env:APPDATA 'qBittorrent\qBittorrent.ini'
+        if ($torrentRoot -and -not (Test-Path $torrentIni)) {
+            $complete = (Join-Path $torrentRoot 'complete') -replace '\\', '/'
+            $incomplete = (Join-Path $torrentRoot 'incomplete') -replace '\\', '/'
+            New-Item -ItemType Directory -Force -Path (Split-Path $torrentIni) | Out-Null
+            @"
+[BitTorrent]
+Session\DefaultSavePath=$complete
+Session\TempPath=$incomplete
+Session\TempPathEnabled=true
+
+[Preferences]
+Downloads\SavePath=$complete
+Downloads\TempPath=$incomplete
+Downloads\TempPathEnabled=true
+General\ExitConfirm=false
+"@ | Set-Content $torrentIni -Encoding UTF8
+            Write-Host "==> qBittorrent paths configured for this account" -ForegroundColor Cyan
+        }
+    } catch {
+        Write-Warning "Could not configure qBittorrent for this account: $($_.Exception.Message)"
+    }
+}
+
+# HTPC has a deliberately split install. Kodi/Jellyfin/Plex were installed
+# machine-wide in phase 1; Stremio is per-user and must be installed here, and
+# Edge shortcuts must use this account's profile. Record every chosen entry now
+# but apply them only after Steam's login has been confirmed below.
+if ($answers -and (@($answers.HtpcApps).Count -gt 0 -or @($answers.HtpcServices).Count -gt 0)) {
+    $htpc = Join-Path $here 'install-htpc.ps1'
+    if (Test-Path $htpc) {
+        Write-Host '==> Finishing HTPC apps for this account...' -ForegroundColor Cyan
+        try {
+            & $htpc -Apps @($answers.HtpcApps) -Services @($answers.HtpcServices) `
+                -Phase user -DeferApply
+        } catch {
+            Write-Warning "Could not finish HTPC apps: $($_.Exception.Message)"
+        }
+    }
 }
 
 # --- this account's own startup ----------------------------------------------
@@ -321,10 +401,20 @@ if ($bootInto -ne 'steam') {
             'hydra'    { 'Hydra.Hydra' }
             default    { $null }
         }
-        if ($package -and (Get-Command winget -ErrorAction SilentlyContinue)) {
+        $wingetForUser = Get-Command winget.exe -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1 -ExpandProperty Source
+        if (-not $wingetForUser) {
+            try {
+                Add-AppxPackage -RegisterByFamilyName `
+                    -MainPackage 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe' -ErrorAction Stop
+            } catch { }
+            $wingetForUser = Get-Command winget.exe -CommandType Application -ErrorAction SilentlyContinue |
+                Select-Object -First 1 -ExpandProperty Source
+        }
+        if ($package -and $wingetForUser) {
             Write-Host "  installing it here, into this account (winget: $package)..." -ForegroundColor Cyan
             try {
-                winget install --id $package --source winget -e --silent `
+                & $wingetForUser install --id $package --source winget -e --silent `
                     --accept-package-agreements --accept-source-agreements
             } catch {
                 Write-Warning "  winget failed: $($_.Exception.Message)"

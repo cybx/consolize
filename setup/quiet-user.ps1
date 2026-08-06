@@ -22,6 +22,9 @@ $settings = @(
     @{ Path = 'HKCU:\SOFTWARE\Microsoft\GameBar'; Name = 'UseNexusForGameBarEnabled'; Value = 0
        Note = 'Guide button belongs to Steam (Game Bar nexus binding off)' }
     @{ Path = 'HKCU:\SOFTWARE\Microsoft\GameBar'; Name = 'ShowStartupPanel'; Value = 0 }
+    @{ Path = 'HKCU:\SOFTWARE\Microsoft\GameBar'; Name = 'AllowAutoGameMode'; Value = 1
+       Note = 'Windows Game Mode on for the console account' }
+    @{ Path = 'HKCU:\SOFTWARE\Microsoft\GameBar'; Name = 'AutoGameModeEnabled'; Value = 1 }
 
     @{ Path = 'HKCU:\System\GameConfigStore'; Name = 'GameDVR_Enabled'; Value = 0
        Note = 'Game DVR capture off for this user' }

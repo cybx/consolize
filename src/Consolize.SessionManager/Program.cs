@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Drawing;
 using System.IO.Pipes;
+using System.Reflection;
+using System.Security.Principal;
 using System.Text.Json;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -60,7 +62,7 @@ internal sealed record AppConfig
 
 internal static class Program
 {
-    private const string PipeName = "consolize";
+    private static readonly string PipeName = $"consolize-{Process.GetCurrentProcess().SessionId}";
 
     private static readonly string DataDir =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Consolize");
@@ -86,6 +88,17 @@ internal static class Program
     private static Process? _frontend;
     private static volatile SessionMode _mode = SessionMode.Console;
     private static volatile bool _resumeConsoleRequested;
+
+    private static string DisplayVersion
+    {
+        get
+        {
+            var informational = typeof(Program).Assembly
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            return (informational ?? typeof(Program).Assembly.GetName().Version?.ToString() ?? "unknown")
+                .Split('+')[0];
+        }
+    }
 
     [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool AttachConsole(uint processId);
@@ -133,7 +146,7 @@ internal static class Program
 
         if (args.Length >= 1 && (args[0] == "--version" || args[0] == "-v"))
         {
-            Console.WriteLine("consolize 0.6.0");
+            Console.WriteLine($"consolize {DisplayVersion}");
             return 0;
         }
 
@@ -269,7 +282,7 @@ internal static class Program
             process.WaitForExit(15000);
             return output.Split('\n')
                 .Select(l => l.Trim())
-                .Where(l => l.Length > 0 && !l.StartsWith("NONE", StringComparison.OrdinalIgnoreCase))
+                .Where(l => l.Length > 0 && !IsNoDeviceSentinel(l))
                 .ToList();
         }
         catch (Exception)
@@ -277,6 +290,10 @@ internal static class Program
             return new List<string>();
         }
     }
+
+    private static bool IsNoDeviceSentinel(string line) =>
+        new[] { "NONE", "NENHUM", "AUCUN", "KEINE", "NINGUNO", "NESSUNO", "GEEN", "BRAK" }
+            .Contains(line, StringComparer.OrdinalIgnoreCase);
 
     private static void OpenPanel()
     {
@@ -299,6 +316,16 @@ internal static class Program
     private static void RunSession()
     {
         Directory.CreateDirectory(LogDir);
+
+        var sid = WindowsIdentity.GetCurrent().User?.Value ?? "unknown";
+        var mutexName = $"Local\\consolize-{Process.GetCurrentProcess().SessionId}-{sid}";
+        using var sessionMutex = new Mutex(true, mutexName, out var ownsSession);
+        if (!ownsSession)
+        {
+            Log("another session manager is already running for this user and session; exiting duplicate");
+            return;
+        }
+
         _config = LoadOrCreateConfig();
         Log($"session manager starting (pid {Environment.ProcessId}, frontend '{_config.Frontend}')");
 
@@ -372,7 +399,7 @@ internal static class Program
                 if (ct.IsCancellationRequested) return;
 
                 // Only in console mode: on the desktop, windowed is normal.
-                if (_mode != SessionMode.Console || ExplorerRunningInThisSession())
+                if (_mode != SessionMode.Console || TaskbarPresent())
                 {
                     emptyFor = 0;
                     continue;
@@ -459,12 +486,18 @@ internal static class Program
 
     private static void WatchdogIteration(CancellationToken ct, Queue<DateTime> crashes)
     {
+        if (_mode == SessionMode.Desktop)
+        {
+            IdleUntilConsoleRequested(ct, null);
+            return;
+        }
+
         var frontend = ResolveFrontend();
         if (frontend is null)
         {
             Log("no frontend found (is Steam/Playnite installed?), falling back to desktop");
             EnterDesktop();
-            IdleUntilConsoleRequested(ct, TimeSpan.FromSeconds(30));
+            IdleUntilConsoleRequested(ct, null);
             return;
         }
 
@@ -492,7 +525,11 @@ internal static class Program
         Log($"frontend started: {exe} {arguments} (pid {proc.Id})");
         ShowSplash(proc);
 
-        try { proc.WaitForExit(); } catch { /* killed externally */ }
+        if (!WaitForFrontend(proc, exe, arguments, ct))
+        {
+            lock (Sync) _frontend = null;
+            return;
+        }
 
         int exitCode;
         try { exitCode = proc.ExitCode; } catch { exitCode = -1; }
@@ -513,7 +550,11 @@ internal static class Program
             {
                 lock (Sync) _frontend = adopted;
                 Log($"frontend handed off to pid {adopted.Id}, watching that instead");
-                try { adopted.WaitForExit(); } catch { /* gone */ }
+                if (!WaitForFrontend(adopted, exe, arguments, ct))
+                {
+                    lock (Sync) _frontend = null;
+                    return;
+                }
                 lock (Sync) _frontend = null;
                 Log("adopted frontend exited");
                 if (ct.IsCancellationRequested) return;
@@ -526,7 +567,7 @@ internal static class Program
         {
             Log("clean exit and RelaunchOnCleanExit=false, entering desktop");
             EnterDesktop();
-            IdleUntilConsoleRequested(ct, TimeSpan.FromSeconds(5));
+            IdleUntilConsoleRequested(ct, null);
             return;
         }
 
@@ -547,13 +588,51 @@ internal static class Program
                 if (_config.FallbackToDesktopAfterMaxCrashes)
                 {
                     EnterDesktop();
-                    IdleUntilConsoleRequested(ct, TimeSpan.FromSeconds(60));
+                    if (!IdleUntilConsoleRequested(ct, TimeSpan.FromSeconds(60)) && !ct.IsCancellationRequested)
+                        EnterConsole();
                     return;
                 }
             }
         }
 
         SleepCancellable(ct, TimeSpan.FromSeconds(_config.RelaunchDelaySeconds));
+    }
+
+    /// <summary>Waits without blocking desktop/console commands. While desktop
+    /// mode is active the frontend stays alive but minimized and is not
+    /// relaunched by the watchdog. Returning to console reissues its fullscreen
+    /// arguments, which makes Steam/Playnite bring their controller UI forward.</summary>
+    private static bool WaitForFrontend(Process proc, string exe, string arguments, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try { if (proc.WaitForExit(500)) return true; }
+            catch { return true; }
+
+            if (_mode != SessionMode.Desktop) continue;
+
+            MinimizeFrontendWindows();
+            IdleUntilConsoleRequested(ct, null);
+            if (ct.IsCancellationRequested) return false;
+
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = exe,
+                    Arguments = arguments,
+                    WorkingDirectory = Path.GetDirectoryName(exe) ?? Environment.SystemDirectory,
+                    UseShellExecute = false,
+                });
+                Log("console mode requested; fullscreen frontend command reissued");
+            }
+            catch (Exception ex)
+            {
+                Log($"could not bring the frontend back to console mode: {ex.Message}");
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -790,8 +869,8 @@ internal static class Program
                 timer.Start();
 
                 Cursor.Hide();
-                Application.Run(form);
-                Cursor.Show();
+                try { Application.Run(form); }
+                finally { Cursor.Show(); }
             }
             catch (Exception ex)
             {
@@ -904,15 +983,47 @@ internal static class Program
     [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
     private static extern IntPtr FindWindow(string? className, string? windowName);
 
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool ShowWindowAsync(IntPtr window, int command);
+
     /// <summary>The taskbar. Its presence is the difference between "explorer
     /// took over as the shell" and "explorer opened a folder window".</summary>
     private static bool TaskbarPresent() => FindWindow("Shell_TrayWnd", null) != IntPtr.Zero;
 
     private static void EnterDesktop()
     {
+        _resumeConsoleRequested = false;
         _mode = SessionMode.Desktop;
         ShowTray();
-        if (ExplorerRunningInThisSession()) return;
+        MinimizeFrontendWindows();
+        if (TaskbarPresent()) return;
+
+        // An Explorer process is not necessarily the Windows desktop. Under a
+        // custom shell it may be only a folder window, with no taskbar; treating
+        // that as success made Desktop Mode appear to do nothing until several
+        // attempts happened to replace it. Clear only those incomplete Explorer
+        // instances in this session, then let one fresh process become the shell.
+        var session = Process.GetCurrentProcess().SessionId;
+        foreach (var existing in Process.GetProcessesByName("explorer"))
+        {
+            try
+            {
+                if (existing.SessionId == session)
+                {
+                    existing.Kill();
+                    existing.WaitForExit(3000);
+                    Log($"stopped explorer without a taskbar (pid {existing.Id})");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"could not stop incomplete explorer {existing.Id}: {ex.Message}");
+            }
+            finally { existing.Dispose(); }
+        }
 
         try
         {
@@ -988,21 +1099,50 @@ internal static class Program
             }
         }
 
+        SetFrontendWindowState(9); // SW_RESTORE; the watchdog also reissues fullscreen args
         _resumeConsoleRequested = true;
     }
 
-    private static bool ExplorerRunningInThisSession()
+    private static void MinimizeFrontendWindows()
+        => SetFrontendWindowState(6); // SW_MINIMIZE
+
+    private static void SetFrontendWindowState(int command)
     {
-        var session = Process.GetCurrentProcess().SessionId;
-        var found = false;
-        foreach (var p in Process.GetProcessesByName("explorer"))
+        string[] names;
+        switch (_config.Frontend.ToLowerInvariant())
         {
-            try { if (p.SessionId == session) found = true; }
-            catch { /* process may have died */ }
-            finally { p.Dispose(); }
+            case "steam": names = new[] { "steam", "steamwebhelper" }; break;
+            case "playnite": names = new[] { "Playnite.FullscreenApp", "Playnite.DesktopApp" }; break;
+            case "hydra": names = new[] { "Hydra" }; break;
+            default:
+                try { names = _frontend is null ? Array.Empty<string>() : new[] { _frontend.ProcessName }; }
+                catch { names = Array.Empty<string>(); }
+                break;
         }
 
-        return found;
+        var session = Process.GetCurrentProcess().SessionId;
+        var processIds = new HashSet<uint>();
+        foreach (var name in names)
+        {
+            foreach (var process in Process.GetProcessesByName(name))
+            {
+                try
+                {
+                    if (process.SessionId == session) processIds.Add((uint)process.Id);
+                }
+                catch { /* process exited */ }
+                finally { process.Dispose(); }
+            }
+        }
+
+        if (processIds.Count == 0) return;
+        EnumWindows((window, _) =>
+        {
+            GetWindowThreadProcessId(window, out var processId);
+            if (processIds.Contains(processId) && IsWindowVisible(window))
+                ShowWindowAsync(window, command);
+            return true;
+        }, IntPtr.Zero);
     }
 
     // ----- control pipe -----------------------------------------------------
@@ -1015,7 +1155,8 @@ internal static class Program
             {
                 using var server = new NamedPipeServerStream(
                     PipeName, PipeDirection.InOut, 1,
-                    PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+                    PipeTransmissionMode.Byte,
+                    PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly | PipeOptions.FirstPipeInstance);
                 server.WaitForConnectionAsync(ct).GetAwaiter().GetResult();
 
                 var reader = new StreamReader(server);
@@ -1091,25 +1232,24 @@ internal static class Program
 
     // ----- helpers ----------------------------------------------------------
 
-    private static void IdleUntilConsoleRequested(CancellationToken ct, TimeSpan retryAfter)
+    private static bool IdleUntilConsoleRequested(CancellationToken ct, TimeSpan? retryAfter)
     {
-        // Clear anything latched while nobody was waiting, otherwise a console
-        // request from an earlier desktop visit makes the crash-loop breaker
-        // return instantly and the machine flaps between a failing frontend and
-        // a half-started Explorer.
-        _resumeConsoleRequested = false;
-
         var waited = TimeSpan.Zero;
         var step = TimeSpan.FromMilliseconds(500);
-        while (!ct.IsCancellationRequested && waited < retryAfter)
+        var requested = false;
+        while (!ct.IsCancellationRequested && (!retryAfter.HasValue || waited < retryAfter.Value))
         {
-            if (_resumeConsoleRequested) break;
-            Thread.Sleep(step);
+            if (_resumeConsoleRequested || _mode == SessionMode.Console)
+            {
+                requested = true;
+                break;
+            }
+            if (ct.WaitHandle.WaitOne(step)) break;
             waited += step;
         }
 
         _resumeConsoleRequested = false;
-        _mode = SessionMode.Console;
+        return requested;
     }
 
     private static void SleepCancellable(CancellationToken ct, TimeSpan duration)

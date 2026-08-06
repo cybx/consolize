@@ -31,6 +31,7 @@ if (-not (Test-Admin) -and -not $NoElevate) {
     Write-Host 'Asking for administrator rights...'
     $arguments = @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"")
     if ($IncludeWindows) { $arguments += '-IncludeWindows' }
+    if ($SelfUrl -ne 'https://get-consolize.cybx.dev') { $arguments += @('-SelfUrl', "`"$SelfUrl`"") }
     try {
         Start-Process powershell -Verb RunAs -ArgumentList $arguments
     } catch {

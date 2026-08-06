@@ -57,3 +57,17 @@ jobs:
       # the tag, when the only way out is another tag.
       - name: Build the session manager
         run: dotnet publish src/Consolize.SessionManager -c Release -r win-x64 -o out/ci
+
+      - name: Smoke-test binary metadata and CLI
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path out/ci/consolize.exe).Path
+          $start = [Diagnostics.ProcessStartInfo]::new($exe, '--version')
+          $start.UseShellExecute = $false
+          $start.RedirectStandardOutput = $true
+          $process = [Diagnostics.Process]::Start($start)
+          $process.WaitForExit()
+          $output = $process.StandardOutput.ReadToEnd().Trim()
+          if ($process.ExitCode -ne 0 -or $output -notmatch '^consolize \d+\.\d+\.\d+') {
+            throw "unexpected version result: exit=$($process.ExitCode), output='$output'"
+          }

@@ -261,7 +261,11 @@ $entries = @(
 # that no longer points at anything this knows about is indistinguishable from
 # one the owner added themselves, and deleting somebody's library entry on a
 # guess is worse than leaving a stale one. -Remove clears them all.
-$extrasFile = Join-Path $env:ProgramData 'Consolize\extra-shortcuts.json'
+$extrasFile = Join-Path $env:ProgramData 'Consolize\shared\extra-shortcuts.json'
+$legacyExtrasFile = Join-Path $env:ProgramData 'Consolize\extra-shortcuts.json'
+if (-not (Test-Path $extrasFile) -and (Test-Path $legacyExtrasFile)) {
+    $extrasFile = $legacyExtrasFile
+}
 if (Test-Path $extrasFile) {
     try {
         # No @() here: Windows PowerShell 5.1 emits a JSON array as one Object[]
