@@ -93,6 +93,10 @@ internal static class Program
     /// and a terminal is all there is. Borrow the caller's console for the
     /// command line paths.
     /// </summary>
+    /// <summary>True when there is a console to print to. Launched from a
+    /// shortcut there is none, so failures have to be shown, not printed.</summary>
+    private static bool _consoleAttached;
+
     private static void AttachToCallerConsole()
     {
         try
@@ -100,9 +104,10 @@ internal static class Program
             // When the caller already captures our output (a pipe, a file, `&`
             // in PowerShell), the standard handles are valid and writing works
             // as it is: attaching and reopening would only get in the way.
-            if (Console.IsOutputRedirected) return;
+            if (Console.IsOutputRedirected) { _consoleAttached = true; return; }
 
             if (!AttachConsole(AttachParentProcess)) return;
+            _consoleAttached = true;
             var stdout = new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true };
             Console.SetOut(stdout);
             var stderr = new StreamWriter(Console.OpenStandardError()) { AutoFlush = true };
@@ -178,7 +183,25 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"consolize: could not reach the session manager ({ex.Message})");
+            var message =
+                $"consolize could not reach the console session manager.\n\n{ex.Message}\n\n" +
+                "This shortcut talks to the process that runs as the console shell. " +
+                "On an ordinary Windows desktop that process is not running, so there is " +
+                "no console session to switch back to.\n\n" +
+                "It works once the console account has had its shell replaced.";
+
+            Console.Error.WriteLine(message);
+
+            // Launched from a shortcut there is no console, so the message above
+            // goes nowhere and the shortcut looks like it did nothing at all.
+            if (!_consoleAttached)
+            {
+                try
+                {
+                    MessageBox.Show(message, "consolize", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch { /* nothing left to try */ }
+            }
             return 1;
         }
     }
