@@ -87,6 +87,11 @@ irm https://get-consolize.cybx.dev | iex
 No need to open PowerShell as administrator: it asks for elevation itself and
 continues in the elevated window.
 
+That address is a Cloudflare Worker in front of this repository, reading through
+the GitHub contents API so a fix published a minute ago is the one that runs;
+`raw.githubusercontent.com` caches for minutes, which is long enough to run
+yesterday's code by accident. Its source is [`cloudflare/worker.js`](cloudflare/worker.js).
+
 The setup scripts are copied to the machine at install time, so a fix published
 later does not reach it on its own. To pull the current ones without starting
 over:
