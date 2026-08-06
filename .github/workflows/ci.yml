@@ -1,0 +1,40 @@
+name: ci
+
+# The checks in this repository have caught real bugs, and every one of them was
+# caught because someone remembered to run them. This is that, without the
+# remembering. Windows, because the scripts are Windows scripts: the VDF tests
+# draw with System.Drawing and use fonts that ship with Windows.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  scripts:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Static checks over every PowerShell script
+        shell: pwsh
+        run: ./scripts/check-scripts.ps1
+
+      - name: Steam shortcuts.vdf round trip
+        shell: pwsh
+        run: ./scripts/test-shortcuts-vdf.ps1
+
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # The release workflow publishes this same project. Building it here means
+      # a change that does not compile is caught on the commit rather than on
+      # the tag, when the only way out is another tag.
+      - name: Build the session manager
+        run: dotnet publish src/Consolize.SessionManager -c Release -r win-x64 -o out/ci
