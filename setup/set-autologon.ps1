@@ -16,6 +16,13 @@ param(
     # Passed by setup-console so the password is typed once for the whole setup.
     # Never a plain string: it stays a SecureString until the LSA call.
     [System.Security.SecureString]$Password,
+    # Fallback for machines where the LSA route does not take. Windows 11 24H2,
+    # which IoT Enterprise LTSC 2024 is built on, has reported cases of LogonUI
+    # clearing AutoAdminLogon on sign-out, tied to LSA protection and Credential
+    # Guard. This writes the password as a plain registry string instead, the
+    # way every autologon guide on the internet does it: anyone who can read the
+    # registry as administrator can read the password. Opt in knowingly.
+    [switch]$AllowPlaintext,
     [switch]$Remove
 )
 $ErrorActionPreference = 'Stop'
@@ -120,13 +127,20 @@ try { $plain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
 finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
 
 [LsaSecret]::Store('DefaultPassword', $plain)
-$plain = $null
 
 Set-ItemProperty $wl -Name AutoAdminLogon -Value '1' -Type String
 Set-ItemProperty $wl -Name DefaultUserName -Value $UserName -Type String
 Set-ItemProperty $wl -Name DefaultDomainName -Value $Domain -Type String
-# kill any cleartext leftover from other tools (GamesDows and friends)
-Remove-ItemProperty $wl -Name DefaultPassword -ErrorAction SilentlyContinue
+
+if ($AllowPlaintext) {
+    Set-ItemProperty $wl -Name DefaultPassword -Value $plain -Type String
+    Write-Warning 'The password is also written to the registry in the clear (-AllowPlaintext).'
+    Write-Warning 'Anyone who can read HKLM as administrator can read it.'
+} else {
+    # kill any cleartext leftover from other tools (GamesDows and friends)
+    Remove-ItemProperty $wl -Name DefaultPassword -ErrorAction SilentlyContinue
+}
+$plain = $null
 
 # Read back rather than assume: a wrong DefaultUserName looks configured and
 # still leaves the machine sitting at a logon screen.
@@ -144,6 +158,9 @@ if ($account -and -not $account.PasswordLastSet) {
 if ($problems) {
     Write-Warning "Autologon may not work for $Domain\$UserName :"
     foreach ($p in $problems) { Write-Warning "  - $p" }
+    Write-Warning 'If it still stops at the logon screen after a reboot, this build may be'
+    Write-Warning 'clearing the setting (reported on 24H2, tied to LSA protection). Retry with:'
+    Write-Warning "  .\set-autologon.ps1 -UserName $UserName -AllowPlaintext"
 } else {
     Write-Host "Autologon set for $Domain\$UserName (password stored as LSA secret, not plaintext)."
     Write-Host 'Verified: AutoAdminLogon=1, DefaultUserName matches, no plaintext password.'
