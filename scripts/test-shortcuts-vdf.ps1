@@ -313,7 +313,13 @@ try {
     Check 'the added app is in the library' ($extra.Count -eq 1) "$($got.AppName -join ', ')"
     Check 'with its arguments' ($extra[0].LaunchOptions -eq '--fullscreen') "got '$($extra[0].LaunchOptions)'"
     Check 'in the Consolize collection' ($extra[0].Tags -contains 'Consolize') "$($extra[0].Tags -join '/')"
-    Check 'and its own icon, not ours' ($extra[0].icon -eq $someApp) "got $($extra[0].icon)"
+    # GitHub's runner exposes TEMP through its 8.3 alias (RUNNER~1), while
+    # GetFullPath in add-app-shortcut expands it to runneradmin. They name the
+    # same file; what matters here is that the extra uses its executable rather
+    # than Consolize's icon.
+    $ownIcon = [IO.Path]::GetFileName($extra[0].icon) -eq [IO.Path]::GetFileName($someApp) -and
+               $extra[0].icon -ne $exe
+    Check 'and its own icon, not ours' $ownIcon "got $($extra[0].icon)"
     $u = [BitConverter]::ToUInt32([BitConverter]::GetBytes([int]$extra[0].appid), 0)
     Check 'artwork was drawn for it' (Test-Path (Join-Path $grid "${u}p.png")) "no ${u}p.png"
 
