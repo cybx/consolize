@@ -333,19 +333,14 @@ if (-not (Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue)) {
         Write-Host "  no password given, using '$UserName'"
     }
 
-    # -NoPassword and -PasswordNeverExpires live in different parameter sets,
-    # so they cannot be splatted together.
+    # Always with a password. A passwordless account is one Windows stops and
+    # demands a password for at sign-in, which kills autologon, and the fallback
+    # above guarantees there is one to use.
     # FullName matches the account name on purpose: the logon screen shows the
     # display name, so a FullName of "Console" put a user called "Console" on
     # screen while every command and every doc says "gamer".
-    if ($password -and $password.Length -gt 0) {
-        New-LocalUser -Name $UserName -Password $password -FullName $UserName `
-            -Description 'consolize console account' -PasswordNeverExpires | Out-Null
-    } else {
-        New-LocalUser -Name $UserName -NoPassword -FullName $UserName `
-            -Description 'consolize console account' | Out-Null
-        Write-Host '  created with no password'
-    }
+    New-LocalUser -Name $UserName -Password $password -FullName $UserName `
+        -Description 'consolize console account' -PasswordNeverExpires | Out-Null
 
     Add-LocalGroupMember -Group 'Users' -Member $UserName -ErrorAction SilentlyContinue
     Write-Host "  '$UserName' created."
