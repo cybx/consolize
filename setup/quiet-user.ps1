@@ -31,6 +31,28 @@ Set-RegValue 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryMan
 Set-RegValue 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'SystemPaneSuggestionsEnabled' 0
 Set-RegValue 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'SoftLandingEnabled' 0
 
+Write-Host 'Desktop background set to the console splash...'
+# The desktop is only ever seen for a moment, on the way to the frontend or in
+# desktop mode, but the default Windows picture there breaks the illusion.
+# Black behind it, so any letterboxing matches the splash.
+$splash = Join-Path $env:ProgramData 'Consolize\splash.png'
+if (Test-Path $splash) {
+    Set-RegValue 'HKCU:\Control Panel\Desktop' 'WallPaper' $splash 'String'
+    Set-RegValue 'HKCU:\Control Panel\Desktop' 'WallpaperStyle' '6' 'String'   # 6 = fit
+    Set-RegValue 'HKCU:\Control Panel\Desktop' 'TileWallpaper' '0' 'String'
+    Set-RegValue 'HKCU:\Control Panel\Colors' 'Background' '0 0 0' 'String'
+
+    Add-Type -MemberDefinition @'
+[DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+public static extern bool SystemParametersInfo(int action, int param, string value, int winIni);
+'@ -Name Wallpaper -Namespace ConsolizeUI -ErrorAction SilentlyContinue
+    # SPI_SETDESKWALLPAPER, SPIF_UPDATEINIFILE | SPIF_SENDWININICHANGE
+    [void][ConsolizeUI.Wallpaper]::SystemParametersInfo(20, 0, $splash, 3)
+    Write-Host "  $splash"
+} else {
+    Write-Host "  no splash.png at $splash, leaving the background alone"
+}
+
 Write-Host 'Screen saver off (a console never interrupts what is on screen)...'
 # The screen saver is per user and survives every power setting: without this it
 # still cuts in over a paused game or a film.

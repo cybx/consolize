@@ -103,6 +103,67 @@ if (Test-Path $answersPath) {
     }
 }
 
+# --- seeing the screen without covering it -----------------------------------
+# The frontend opens fullscreen, on top of this window. Asking here would mean
+# leaving the frontend to answer a question about the frontend, so: detect it
+# automatically, and when a question is unavoidable, ask in a topmost dialog
+# that draws over it.
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class ConsolizeWin32
+{
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT { public int Left, Top, Right, Bottom; }
+
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+}
+'@ -ErrorAction SilentlyContinue
+
+function Test-FrontendOnScreen {
+    param([string[]]$ProcessNames = @('steam', 'steamwebhelper'))
+
+    $handle = [ConsolizeWin32]::GetForegroundWindow()
+    if ($handle -eq [IntPtr]::Zero) { return $false }
+
+    # NOT $pid: that is an automatic variable and [ref] on it fails
+    $ownerId = 0
+    [void][ConsolizeWin32]::GetWindowThreadProcessId($handle, [ref]$ownerId)
+    $owner = Get-Process -Id $ownerId -ErrorAction SilentlyContinue
+    if (-not $owner -or $ProcessNames -notcontains $owner.ProcessName) { return $false }
+
+    $rect = New-Object ConsolizeWin32+RECT
+    if (-not [ConsolizeWin32]::GetWindowRect($handle, [ref]$rect)) { return $false }
+
+    $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $width = $rect.Right - $rect.Left
+    $height = $rect.Bottom - $rect.Top
+    return ($width -ge $screen.Width * 0.9 -and $height -ge $screen.Height * 0.9)
+}
+
+function Show-TopmostQuestion {
+    param([string]$Text, [string]$Caption = 'consolize')
+
+    $owner = New-Object System.Windows.Forms.Form
+    $owner.TopMost = $true
+    $owner.ShowInTaskbar = $false
+    $owner.Size = New-Object System.Drawing.Size(1, 1)
+    $owner.StartPosition = 'CenterScreen'
+    $null = $owner.Handle   # force the window to exist so it can own the dialog
+    try {
+        return [System.Windows.Forms.MessageBox]::Show(
+            $owner, $Text, $Caption,
+            [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
+            [System.Windows.Forms.MessageBoxIcon]::Question)
+    } finally {
+        $owner.Dispose()
+    }
+}
+
 $script:loginConfirmed = $false
 $steam = Get-SteamPath
 
@@ -173,39 +234,57 @@ if ($bootInto -ne 'steam') {
         # running client: one that just authenticated is usually still updating
         # or restarting itself, and -bigpicture on top of that does nothing.
         $bigPictureOk = $false
-        $answer = 'r'
-        while ($answer -match '^[rR]') {
+        $attempt = 0
+        while ($true) {
+            $attempt++
             Write-Host ''
-            Write-Host '  Restarting Steam into Big Picture...'
+            Write-Host "  Restarting Steam into Big Picture (attempt $attempt)..."
             Get-Process steam, steamwebhelper -ErrorAction SilentlyContinue |
                 Stop-Process -Force -ErrorAction SilentlyContinue
             Start-Sleep -Seconds 5
             Start-Process (Join-Path $steam 'steam.exe') -ArgumentList '-bigpicture'
 
-            Write-Host '  Waiting up to 60s for it to come up (a first launch after signing in'
-            Write-Host '  often updates the client first)...'
-            for ($i = 0; $i -lt 12; $i++) {
-                Start-Sleep -Seconds 5
+            # Watch for it rather than ask: a fullscreen frontend in the
+            # foreground is the answer, and it arrives without anyone leaving it.
+            Write-Host '  Watching for a fullscreen Steam window (up to 90s)...'
+            $detected = $false
+            for ($i = 0; $i -lt 45; $i++) {
+                Start-Sleep -Seconds 2
+                if (Test-FrontendOnScreen) { $detected = $true; break }
                 Write-Host -NoNewline '.'
             }
             Write-Host ''
 
-            Write-Host ''
-            Write-Host '  Did Big Picture open, signed in, with no login screen?'
-            Write-Host '    [Y] yes, it looks right          [R] not yet, try again'
-            Write-Host '    [N] no, stop and leave the shell alone'
-            Write-Host '    [F] no, but replace the shell anyway (this machine has no GPU,'
-            Write-Host '        so Big Picture cannot render here)'
-            $answer = Read-Host '  Choice [Y/r/n/f]'
-
-            if ([string]::IsNullOrWhiteSpace($answer) -or $answer -match '^[yY]') { $bigPictureOk = $true; break }
-            if ($answer -match '^[fF]') {
-                Write-Warning '  Forcing: the shell will be replaced without a working frontend.'
-                Write-Warning '  If the frontend never starts, the watchdog falls back to the desktop.'
+            if ($detected) {
+                Write-Host '  Big Picture is on screen.' -ForegroundColor Green
                 $bigPictureOk = $true
                 break
             }
-            if ($answer -match '^[nN]') { break }
+
+            # Only now ask, and ask on top of whatever is covering the screen.
+            $reply = Show-TopmostQuestion -Caption 'consolize: is Big Picture up?' -Text @"
+Steam was restarted in Big Picture mode, but no fullscreen Steam window was
+detected.
+
+Yes    it is on screen and signed in, carry on
+No     try again (restart Steam and watch once more)
+Cancel it will not open here, replace the shell anyway
+
+Cancel is the right answer on a machine with no GPU, where Big Picture cannot
+render at all. The shell still falls back to the desktop if the frontend never
+starts.
+"@
+
+            if ($reply -eq [System.Windows.Forms.DialogResult]::Yes) { $bigPictureOk = $true; break }
+            if ($reply -eq [System.Windows.Forms.DialogResult]::Cancel) {
+                Write-Warning '  Carrying on without a verified frontend.'
+                $bigPictureOk = $true
+                break
+            }
+            if ($attempt -ge 3) {
+                Write-Warning '  Giving up after three attempts; the shell will not be replaced.'
+                break
+            }
         }
 
         if ($bigPictureOk) {

@@ -346,17 +346,21 @@ if (-not (Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue)) {
     Write-Host "  '$UserName' created."
 }
 
-# A brand new account has no PasswordLastSet, and Windows reads that as "must
-# set a password at the next sign-in": it stops at the logon screen asking for
-# one, and automatic logon simply never happens. Setting the password
-# explicitly, even an empty one, stamps PasswordLastSet and clears that state.
+# An account with no PasswordLastSet is one Windows will stop and demand a
+# password for, so autologon can never happen. Fix it by setting THE SAME
+# password autologon will use: an empty one here would leave the account and the
+# stored credential disagreeing, which shows up as "password incorrect" at every
+# boot with no clue why.
 $account = Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue
 if ($account -and -not $account.PasswordLastSet) {
+    $repair = $script:newUserPassword
+    if (-not $repair -or $repair.Length -eq 0) { $repair = ConvertTo-SecureString $UserName -AsPlainText -Force }
     try {
-        Set-LocalUser -Name $UserName -Password (New-Object System.Security.SecureString) -ErrorAction Stop
-        Write-Host "  '$UserName' password state stamped (no blank-password prompt at logon)"
+        Set-LocalUser -Name $UserName -Password $repair -ErrorAction Stop
+        $script:newUserPassword = $repair
+        Write-Host "  '$UserName' had no password set; gave it the one autologon will use"
     } catch {
-        Write-Warning "  could not stamp the password state: $($_.Exception.Message)"
+        Write-Warning "  could not set the password: $($_.Exception.Message)"
     }
 }
 try { Set-LocalUser -Name $UserName -PasswordNeverExpires $true -ErrorAction Stop } catch { }
