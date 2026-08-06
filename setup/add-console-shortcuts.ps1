@@ -249,6 +249,56 @@ $entries = @(
        Glyph = [char]0xE777; Accent = @(232, 180, 100) }
 )
 
+# Anything else the owner wants reachable from the couch. Steam's own "add a
+# non-Steam game" needs a mouse and a file browser, which is the one thing a
+# console does not have, so the list lives in a file instead and this puts it in
+# the library with the same artwork and the same collection as the rest.
+#
+# Written by add-app-shortcut.ps1, or by hand:
+#   [ { "name": "RetroArch", "exe": "C:\\RetroArch\\retroarch.exe", "args": "" } ]
+#
+# Removing an app from the file does not remove it from the library: an entry
+# that no longer points at anything this knows about is indistinguishable from
+# one the owner added themselves, and deleting somebody's library entry on a
+# guess is worse than leaving a stale one. -Remove clears them all.
+$extrasFile = Join-Path $env:ProgramData 'Consolize\extra-shortcuts.json'
+if (Test-Path $extrasFile) {
+    try {
+        $extras = @(Get-Content $extrasFile -Raw | ConvertFrom-Json)
+        foreach ($extra in $extras) {
+            if (-not $extra.name -or -not $extra.exe) {
+                Write-Warning "  an entry in extra-shortcuts.json has no name or no exe, skipping it"
+                continue
+            }
+            if (-not (Test-Path $extra.exe)) {
+                Write-Warning "  '$($extra.name)': $($extra.exe) is not there, skipping it"
+                continue
+            }
+            # A colour per app, derived from its name so it is stable across
+            # runs and different from its neighbours, which is the whole point
+            # of cover art in a grid.
+            $seed = 0
+            foreach ($c in $extra.name.ToCharArray()) { $seed = ($seed * 31 + [int]$c) % 360 }
+            $rgb = switch ([int]($seed / 60)) {
+                0 { @(232, 130, 120) } 1 { @(232, 190, 110) } 2 { @(150, 220, 140) }
+                3 { @(110, 210, 210) } 4 { @(130, 165, 245) } default { @(195, 140, 235) }
+            }
+            $entries += @{
+                Name = [string]$extra.name
+                Exe = [string]$extra.exe
+                Args = [string]$extra.args
+                # AppIconDefault, unless the file names another MDL2 code point
+                Glyph = if ($extra.glyph) { [char][Convert]::ToInt32($extra.glyph, 16) } else { [char]0xECAA }
+                Accent = $rgb
+                OwnIcon = $true
+            }
+        }
+        if ($extras.Count) { Write-Host "Extra shortcuts from $($extrasFile): $(($extras | ForEach-Object { $_.name }) -join ', ')" }
+    } catch {
+        Write-Warning "Could not read $extrasFile ($($_.Exception.Message)), ignoring it."
+    }
+}
+
 # Steam looks for artwork in config\grid, named after the shortcut's appid in
 # its unsigned form. The appid stored in the file is a signed 32 bit integer and
 # ours are all negative, so the two never look alike: -1680150366 on one side,
@@ -363,6 +413,38 @@ function Remove-StaleArtwork {
     elseif (Test-Path $manifest) { Remove-Item $manifest -Force -ErrorAction SilentlyContinue }
 }
 
+# Cover art this run drew, per Steam profile, so the cleanup at the end knows
+# what is current without redrawing anything to find out.
+$drawnFor = @{}
+
+# Two things decide whether an image is stale: whether we just drew it, and
+# whether the library still has an entry using it. The second one is the reason
+# this cannot run alongside the drawing. An app dropped from
+# extra-shortcuts.json keeps its library entry on purpose, and taking its cover
+# art away on the way past left a blank card, which looks broken rather than
+# tidy; while an entry whose appid moved leaves art nothing will ever look up.
+# Reading the file after it is settled tells the two apart.
+function Clear-StaleArtwork {
+    param($UserDir)
+    $gridDir = Join-Path $UserDir.FullName 'config\grid'
+    if (-not (Test-Path $gridDir)) { return }
+
+    $keep = New-Object System.Collections.Generic.List[uint32]
+    foreach ($id in @($drawnFor[$UserDir.Name])) { $keep.Add($id) }
+
+    $vdfPath = Join-Path $UserDir.FullName 'config\shortcuts.vdf'
+    if (Test-Path $vdfPath) {
+        try {
+            foreach ($present in (Read-ShortcutsVdf -Bytes ([IO.File]::ReadAllBytes($vdfPath))).Entries) {
+                if ($null -ne $present.AppId) {
+                    $keep.Add([BitConverter]::ToUInt32([BitConverter]::GetBytes([int]$present.AppId), 0))
+                }
+            }
+        } catch { }
+    }
+    Remove-StaleArtwork -GridDir $gridDir -Keep $keep.ToArray()
+}
+
 # Artwork is written whether or not the entries need touching, and without
 # closing Steam: these are plain files read off disk, not state Steam holds in
 # memory. That way a machine set up before this existed picks it up on the next
@@ -385,7 +467,10 @@ foreach ($userDir in $userDirs) {
             Write-Warning "  could not draw the artwork for '$($entry.Name)': $($_.Exception.Message)"
         }
     }
-    Remove-StaleArtwork -GridDir $gridDir -Keep $written.ToArray()
+    # Cleanup is deliberately NOT done here. Which images are stale depends on
+    # what the library ends up containing, and that is not known until the file
+    # has been written, so it happens at the end of each path instead.
+    $drawnFor[$userDir.Name] = $written.ToArray()
     Write-Host "  $($userDir.Name): artwork written to config\grid"
 }
 
@@ -403,7 +488,7 @@ foreach ($entry in $entries) {
     $wanted[$entry.Name] = [pscustomobject]@{
         AppId = Get-ShortcutAppId -Exe "`"$($entry.Exe)`"" -AppName $entry.Name
         Exe = "`"$($entry.Exe)`""
-        Icon = $iconFile
+        Icon = if ($entry.OwnIcon) { $entry.Exe } else { $iconFile }
         LaunchOptions = $entry.Args
         Tags = $Collection
     }
@@ -469,6 +554,7 @@ foreach ($userDir in $userDirs) {
 }
 
 if (-not $needsWork) {
+    foreach ($userDir in $userDirs) { Clear-StaleArtwork -UserDir $userDir }
     Write-Host $(if ($Remove) { 'No console entries in the Steam library, nothing to remove.' }
                  else { 'The Steam library already has the console entries, nothing to do.' })
     return
@@ -592,12 +678,13 @@ foreach ($userDir in $userDirs) {
             Add-VdfString $w 'AppName' $entry.Name
             Add-VdfString $w 'Exe' "`"$($entry.Exe)`""
             Add-VdfString $w 'StartDir' "`"$(Split-Path $entry.Exe)`""
-            # Always our icon, even when the target is powershell.exe. The .ico
-            # beside the binary is preferred over the binary itself: pointing at
-            # an exe makes Steam extract whatever size the icon resource happens
-            # to carry, and both the library and Big Picture draw it bigger than
-            # that. Falls back to the exe when the file is not there.
-            Add-VdfString $w 'icon' $iconFile
+            # Our icon for our own entries, even when the target is
+            # powershell.exe, and the app's own for anything the owner added.
+            # The .ico beside the binary is preferred over the binary itself:
+            # pointing at an exe makes Steam extract whatever size the icon
+            # resource happens to carry, and both the library and Big Picture
+            # draw it bigger than that.
+            Add-VdfString $w 'icon' $(if ($entry.OwnIcon) { $entry.Exe } else { $iconFile })
             Add-VdfString $w 'ShortcutPath' ''
             Add-VdfString $w 'LaunchOptions' $entry.Args
             Add-VdfInt $w 'IsHidden' 0
@@ -650,6 +737,7 @@ foreach ($userDir in $userDirs) {
     }
 
     [IO.File]::WriteAllBytes($vdf, $result)
+    Clear-StaleArtwork -UserDir $userDir
     Write-Host "  $($userDir.Name): $($check.Names.Count) shortcut(s) in the library, $($toWrite.Count) of them ours."
 }
 

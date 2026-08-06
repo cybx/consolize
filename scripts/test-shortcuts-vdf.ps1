@@ -248,6 +248,45 @@ Check 'the binary moved, the old images went too' ($after -eq $before) "$before 
 Check 'and the entries followed it' (
     (Parse-Vdf ([IO.File]::ReadAllBytes($vdf))).Count -eq 4) 'entry count changed'
 
+Write-Host "`n13. an app the owner added gets an entry, artwork and the collection"
+# Steam can add a non-Steam game itself, but that needs a mouse and a file
+# browser, which is exactly what a machine booting into Big Picture does not
+# have. The list is a file instead.
+$extrasDir = Join-Path $env:ProgramData 'Consolize'
+$extrasFile = Join-Path $extrasDir 'extra-shortcuts.json'
+$extrasBackup = "$extrasFile.testbackup"
+$hadExtras = Test-Path $extrasFile
+if ($hadExtras) { Move-Item $extrasFile $extrasBackup -Force }
+try {
+    $someApp = Join-Path $root 'SomeApp.exe'
+    Set-Content $someApp 'stub'
+    New-Item -ItemType Directory -Force -Path $extrasDir | Out-Null
+    , @([pscustomobject]@{ name = 'RetroArch'; exe = $someApp; args = '--fullscreen' }) |
+        ConvertTo-Json -Depth 4 | Set-Content $extrasFile
+
+    & $script -ConsolizeExe $exe -Force -Remove *> $null
+    & $script -ConsolizeExe $exe -Force | Out-Null
+    $got = Parse-Vdf ([IO.File]::ReadAllBytes($vdf))
+    $extra = @($got | Where-Object { $_.AppName -eq 'RetroArch' })
+
+    Check 'the added app is in the library' ($extra.Count -eq 1) "$($got.AppName -join ', ')"
+    Check 'with its arguments' ($extra[0].LaunchOptions -eq '--fullscreen') "got '$($extra[0].LaunchOptions)'"
+    Check 'in the Consolize collection' ($extra[0].Tags -contains 'Consolize') "$($extra[0].Tags -join '/')"
+    Check 'and its own icon, not ours' ($extra[0].icon -eq $someApp) "got $($extra[0].icon)"
+    $u = [BitConverter]::ToUInt32([BitConverter]::GetBytes([int]$extra[0].appid), 0)
+    Check 'artwork was drawn for it' (Test-Path (Join-Path $grid "${u}p.png")) "no ${u}p.png"
+
+    # An entry naming a program that is not installed would launch nothing.
+    , @([pscustomobject]@{ name = 'Ghost'; exe = 'C:\nope\ghost.exe'; args = '' }) |
+        ConvertTo-Json -Depth 4 | Set-Content $extrasFile
+    & $script -ConsolizeExe $exe -Force -WarningAction SilentlyContinue | Out-Null
+    $got = Parse-Vdf ([IO.File]::ReadAllBytes($vdf))
+    Check 'an app that is not installed is skipped' ($got.AppName -notcontains 'Ghost') "$($got.AppName -join ', ')"
+} finally {
+    Remove-Item $extrasFile -Force -ErrorAction SilentlyContinue
+    if ($hadExtras) { Move-Item $extrasBackup $extrasFile -Force }
+}
+
 Write-Host ''
 if ($fail) { Write-Host "$fail check(s) failed" -ForegroundColor Red; exit 1 }
 Write-Host 'all checks passed' -ForegroundColor Green

@@ -154,6 +154,7 @@ $catalog = [ordered]@{
     frontends = @{ Label = 'Game launchers: Steam / Playnite / Hydra';             Recommended = $true }
     java      = @{ Label = 'Java (only for third-party Minecraft launchers and servers)'; Recommended = $false }
     media     = @{ Label = 'VLC and mpv (play anything on the TV, no codec pack)'; Recommended = $true }
+    youtube   = @{ Label = 'YouTube on the TV, gamepad driven (VacuumTube)';       Recommended = $true }
     tools     = @{ Label = 'Git and 7-Zip';                                        Recommended = $true }
     torrent   = @{ Label = 'qBittorrent plus a torrent folder layout';             Recommended = $false }
     defender  = @{ Label = 'Defender: tune (default) or disable entirely';         Recommended = $true }
@@ -195,7 +196,7 @@ if (-not $selected -or $selected.Count -eq 0) { Write-Host 'Nothing selected, by
 #
 # defender last: its exclusions cover the game folders, which do not exist until
 # the installs above have run.
-$order = @('frontends', 'updates', 'gpu', 'runtimes', 'java', 'media', 'tools', 'torrent', 'defender')
+$order = @('frontends', 'updates', 'gpu', 'runtimes', 'java', 'media', 'youtube', 'tools', 'torrent', 'defender')
 $selected = $order | Where-Object { $selected -contains $_ }
 
 Write-Host ''
@@ -260,6 +261,18 @@ foreach ($key in $selected) {
             # needs. System Java is for servers, third-party launchers (Prism,
             # MultiMC) and some mod loaders.
             Install-FirstAvailable @('Microsoft.OpenJDK.21', 'EclipseAdoptium.Temurin.21.JDK') 'Java (OpenJDK 21)'
+        }
+
+        'youtube' {
+            # Its own script because this one is not a winget id: the TV
+            # interface is blocked to browsers, so it comes from a GitHub
+            # release, and the reasoning is long enough to want its own file.
+            $youtube = Join-Path $PSScriptRoot 'install-youtube.ps1'
+            if (Test-Path $youtube) {
+                try { & $youtube } catch { Write-Warning "YouTube: $($_.Exception.Message)" }
+            } else {
+                Write-Warning 'install-youtube.ps1 is not here, skipping.'
+            }
         }
 
         'media' {

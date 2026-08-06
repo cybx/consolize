@@ -217,6 +217,51 @@ That gives back the logon screen, the desktop and the boot messages in one go,
 and cancels anything still scheduled. The logon screen is only hidden at the very
 end of a successful setup, precisely so a failure never hides the way back in.
 
+### Putting your own apps in the library
+
+Steam can add a non-Steam game itself, but that takes a mouse and a file
+browser, and a machine that boots into Big Picture has neither. From a terminal
+in desktop mode:
+
+```powershell
+cd 'C:\Program Files\Consolize\setup'
+.\add-app-shortcut.ps1 -Name 'RetroArch' -Exe 'C:\RetroArch\retroarch.exe'
+.\add-app-shortcut.ps1 -List
+```
+
+It gets cover art and lands in the **Consolize** collection with the rest. The
+list lives in `C:\ProgramData\Consolize\extra-shortcuts.json`, so it is
+reapplied on every update rather than being a one-off.
+
+Taking an app off the list does not remove it from the library: an entry that no
+longer matches anything consolize knows about cannot be told apart from one you
+added by hand. To clear them all: `add-console-shortcuts.ps1 -Remove -Force`,
+then run it again without `-Remove`.
+
+### YouTube on the television
+
+`bootstrap-gaming.ps1` offers it, or on its own:
+
+```powershell
+.\install-youtube.ps1
+```
+
+The obvious route does not work, which is worth knowing before you try it.
+YouTube's TV interface is a plain web app at `youtube.com/tv`, but Google blocks
+browsers from it unless they identify as a console or a TV, and the user-agent
+trick that gets past that gives you the interface without gamepad support: arrow
+keys work, the controller does nothing. Most recipes for this online predate the
+block.
+
+So this installs [VacuumTube](https://github.com/shy1132/VacuumTube), which
+wraps that same official interface in Electron, identifies as the YouTube TV app
+and implements controller input itself. MIT, actively maintained, not on winget,
+so it comes from its GitHub release. It gets a library entry like everything
+else.
+
+Sign in with **Settings > Link with TV code** rather than typing a password on a
+television.
+
 ### Taking it back off
 
 `rescue.ps1` is for a setup that went wrong, and only undoes what can hide the
