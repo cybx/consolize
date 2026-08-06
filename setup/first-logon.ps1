@@ -84,7 +84,30 @@ function Get-SteamPathEarly {
     return $null
 }
 
+# The answers from phase 1, read once here because everything below depends on
+# them: which frontend this account boots into, and what language Steam starts
+# in. Read after Steam is found but before it is launched, so the language is in
+# place the first time the client reads it.
+$answers = $null
+$answersPath = Join-Path $env:ProgramData 'Consolize\answers.json'
+if (Test-Path $answersPath) {
+    try { $answers = Get-Content $answersPath -Raw | ConvertFrom-Json }
+    catch { Write-Warning "Could not read $answersPath, assuming defaults." }
+}
+
 $steamEarly = Get-SteamPathEarly
+
+# Steam's own language, which is the one on screen on a machine that boots into
+# Big Picture: the Windows interface only shows in desktop mode. Per Windows
+# user, so it belongs here rather than in phase 1. Once signed in, Steam follows
+# the language on the Steam account, so this mostly decides what the screens
+# before that look like.
+if ($answers -and $answers.SteamLanguage) {
+    $languageKey = 'HKCU:\SOFTWARE\Valve\Steam'
+    if (-not (Test-Path $languageKey)) { New-Item -Path $languageKey -Force | Out-Null }
+    New-ItemProperty -Path $languageKey -Name 'Language' -Value $answers.SteamLanguage -PropertyType String -Force | Out-Null
+    Write-Host "==> Steam language: $($answers.SteamLanguage)" -ForegroundColor Cyan
+}
 
 # Inherit a sign-in done from another account. Steam keeps the credential in
 # config\loginusers.vdf, which lives in the install directory and is therefore
@@ -176,19 +199,7 @@ function Test-SteamLogin {
     return ($raw -match '"(RememberPassword|AutoLogin)"\s+"1"')
 }
 
-# Which frontend the console boots into decides what this account still needs.
-# Without reading it, a Playnite console would sit here waiting for a Steam
-# sign-in that is never coming, and the whole automated flow would dead-end.
-$bootInto = 'steam'
-$answersPath = Join-Path $env:ProgramData 'Consolize\answers.json'
-if (Test-Path $answersPath) {
-    try {
-        $answers = Get-Content $answersPath -Raw | ConvertFrom-Json
-        if ($answers.BootInto) { $bootInto = $answers.BootInto }
-    } catch {
-        Write-Warning "Could not read $answersPath, assuming Steam."
-    }
-}
+$bootInto = if ($answers -and $answers.BootInto) { $answers.BootInto } else { 'steam' }
 
 # --- seeing the screen without covering it -----------------------------------
 # The frontend opens fullscreen, on top of this window. Asking here would mean

@@ -20,9 +20,9 @@ it decides what comes out when you type the Steam password on the on-screen
 keyboard. A Brazilian machine left on the US layout puts the wrong characters
 under the punctuation keys.
 
-  .\locale-console.ps1 -Language pt-BR
+  .\locale-console.ps1 -Language pt-BR -KeyboardLayout 0416:00000416
   .\locale-console.ps1 -Language pt-BR -TimeZone 'E. South America Standard Time'
-  .\locale-console.ps1 -Language en-US -SkipLanguagePack   # only formats/keyboard
+  .\locale-console.ps1 -Language pt-BR -InstallLanguagePack   # also the Windows UI
 #>
 param(
     [Parameter(Mandatory)] [string]$Language,
@@ -33,9 +33,12 @@ param(
     # List what is installed with: Get-WinUserLanguageList
     [string]$KeyboardLayout,
     [string]$TimeZone,
-    # The display language is a real download. Skip it to change only the
-    # formats, keyboard and time zone.
-    [switch]$SkipLanguagePack
+    # Opt in, not out. The Windows display language is a 100-300 MB download
+    # from Windows Update, and on a machine that boots into Big Picture the
+    # Windows interface is barely ever on screen: it shows in desktop mode and
+    # in Settings, and nowhere else. The keyboard layout and the regional
+    # formats, which cost nothing, are what actually matter day to day.
+    [switch]$InstallLanguagePack
 )
 $ErrorActionPreference = 'Stop'
 
@@ -43,7 +46,9 @@ Write-Host "Language: $Language"
 
 # --- the display language pack ----------------------------------------------
 
-if (-not $SkipLanguagePack) {
+if (-not $InstallLanguagePack) {
+    Write-Host '  display language left alone (pass -InstallLanguagePack to download it)'
+} else {
     $installed = (Get-InstalledLanguage -ErrorAction SilentlyContinue).LanguageId
     if ($installed -contains $Language) {
         Write-Host '  language pack already installed'

@@ -233,24 +233,29 @@ if ($Unattended) {
     }
 
     Write-Host ''
-    Write-Host 'LANGUAGE' -ForegroundColor Yellow
+    Write-Host 'LANGUAGE AND KEYBOARD' -ForegroundColor Yellow
     $currentLang = (Get-WinUserLanguageList | Select-Object -First 1).LanguageTag
-    $currentTz = (Get-TimeZone).Id
-    Write-Host "  Now: $currentLang, keyboard $(((Get-WinUserLanguageList | Select-Object -First 1).InputMethodTips) -join ','), time zone $currentTz"
-    Write-Host '  The keyboard layout matters more than it looks: it decides what comes out'
-    Write-Host '  when you type the Steam password on the on-screen keyboard.'
-    $language = Read-Host "  language tag to use, e.g. pt-BR (Enter to keep $currentLang)"
-    if ([string]::IsNullOrWhiteSpace($language)) { $language = $null }
+    $currentKeyboard = ((Get-WinUserLanguageList | Select-Object -First 1).InputMethodTips) -join ','
+    Write-Host "  Now: $currentLang, keyboard $currentKeyboard, time zone $((Get-TimeZone).Id)"
+    Write-Host ''
+    Write-Host '  Steam has its own language, which is the one actually on screen here: the'
+    Write-Host '  Windows interface only shows in desktop mode. Its display language is a'
+    Write-Host "  100-300 MB download and is left alone; locale-console.ps1 -InstallLanguagePack"
+    Write-Host '  installs it later if you want it.'
+    $steamLanguage = Read-Host '  Steam language: brazilian, english, spanish, latam, french... (Enter for english)'
+    if ([string]::IsNullOrWhiteSpace($steamLanguage)) { $steamLanguage = $null }
 
-    $keyboard = $null
-    if ($language) {
-        Write-Host '  Keyboard layout, which is not implied by the language: a Brazilian'
-        Write-Host '  machine may have an ABNT2, an ABNT1 or a US board.'
-        Write-Host '    0416:00000416  Portuguese (Brazil ABNT2)     0416:00010416  ABNT1'
-        Write-Host '    0409:00000409  US                            0409:00020409  US International'
-        $keyboard = Read-Host '  layout id (Enter to keep the current one)'
-        if ([string]::IsNullOrWhiteSpace($keyboard)) { $keyboard = $null }
-    }
+    Write-Host ''
+    Write-Host '  Keyboard layout, which is not implied by the language: a Brazilian machine'
+    Write-Host '  may have an ABNT2, an ABNT1 or a US board. This one is worth getting right,'
+    Write-Host '  it decides what comes out when you type the Steam password on screen.'
+    Write-Host '    0416:00000416  Portuguese (Brazil ABNT2)     0416:00010416  ABNT1'
+    Write-Host '    0409:00000409  US                            0409:00020409  US International'
+    $keyboard = Read-Host '  layout id (Enter to keep the current one)'
+    if ([string]::IsNullOrWhiteSpace($keyboard)) { $keyboard = $null }
+
+    # Only worth touching Windows locale when something about it changes.
+    $language = if ($keyboard) { $currentLang } else { $null }
 
     Write-Host ''
     Write-Host 'LAUNCHERS' -ForegroundColor Yellow
@@ -322,8 +327,9 @@ if ($Unattended) {
         RestMode    = $restMode
         Autologon   = $autologon
         Elevation   = $elevation
-        Language    = $language
-        Keyboard    = $keyboard
+        Language      = $language
+        Keyboard      = $keyboard
+        SteamLanguage = $steamLanguage
         Firewall    = $firewall
         ShellMethod = $ShellMethod
     }
