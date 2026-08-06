@@ -181,10 +181,24 @@ support arrives when the kernel and Mesa catch up, which is exactly the gap RDNA
 
 ### What you give up, honestly
 
-Suspend and resume. SteamOS does it properly; Windows desktop does not, which is
-why [`power-console.ps1`](setup/power-console.ps1) exists and why hibernate is
-offered as the reliable fallback. And you need this project at all, whereas
-SteamOS ships a console experience out of the box.
+Suspend and resume, with a caveat that matters. The problem is not sleep as
+such: on hardware that exposes real S3, sleep works fine and it is what
+[`power-console.ps1`](setup/power-console.ps1) defaults to. The pain is Modern
+Standby (S0ix), which is most new laptops and handhelds, where Windows drops
+into it unreliably and wakes for reasons nobody asked for. On a Steam Deck,
+where S3 is firmware driven, Windows is not meaningfully worse than SteamOS
+here.
+
+Hibernate is offered for the machines where sleep is not trustworthy, and it is
+worth being honest about what it costs. It is not a shutdown: RAM is serialised
+to disk and process state comes back. But device and network state do not. A
+game can hit a lost D3D device on resume, an online session was dropped by the
+server long ago, and some anticheat modules dislike the gap. So hibernate is
+the option that survives a power cut, not the one that returns you to the middle
+of a match.
+
+And you need this project at all, whereas SteamOS ships a console experience out
+of the box.
 
 ## Why Windows 11 IoT Enterprise LTSC?
 

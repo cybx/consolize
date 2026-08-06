@@ -183,10 +183,24 @@ lacuna em que a RDNA 4 passou quase todo o primeiro ano.
 
 ### O que você perde, honestamente
 
-Suspender e retomar. O SteamOS faz isso direito; o Windows desktop não, e é por
-isso que o [`power-console.ps1`](setup/power-console.ps1) existe e que a
-hibernação é oferecida como alternativa confiável. E você precisa deste projeto,
-enquanto o SteamOS já vem com a experiência de console pronta.
+Suspender e retomar, com uma ressalva que importa. O problema não é o sleep em
+si: em hardware que expõe S3 de verdade, ele funciona bem, e é o padrão do
+[`power-console.ps1`](setup/power-console.ps1). A dor é o Modern Standby (S0ix),
+que é a maioria dos notebooks e portáteis novos, onde o Windows entra nele de
+forma pouco confiável e acorda por motivos que ninguém pediu. Num Steam Deck,
+onde o S3 é comandado pelo firmware, o Windows não é significativamente pior que
+o SteamOS nesse ponto.
+
+A hibernação é oferecida para as máquinas em que o sleep não é confiável, e vale
+ser honesto sobre o que ela custa. Ela não é um desligamento: a RAM é gravada em
+disco e o estado dos processos volta. Mas o estado de dispositivo e de rede não
+volta. Um jogo pode bater em perda de dispositivo D3D ao retomar, uma sessão
+online já foi derrubada pelo servidor faz tempo, e alguns módulos de anticheat
+não gostam do intervalo. Ou seja: a hibernação sobrevive a uma queda de energia,
+não te devolve ao meio de uma partida.
+
+E você precisa deste projeto, enquanto o SteamOS já vem com a experiência de
+console pronta.
 
 ## Por que Windows 11 IoT Enterprise LTSC?
 
