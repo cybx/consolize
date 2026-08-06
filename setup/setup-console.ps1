@@ -517,14 +517,34 @@ if ($a.Autologon) {
 }
 
 # The warm-up Steam from the install step has had the whole of phase 1 to pull
-# its update. Close it before the reboot: it must not be running, and must not
-# be this session's, when the console account signs in.
+# its update, and it is sitting in the tray, updated and signed out.
 $warm = Get-Process steam, steamwebhelper -ErrorAction SilentlyContinue
+if ($warm -and $a.BootInto -eq 'steam') {
+    $steamPath = @(
+        (Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam' -Name InstallPath -ErrorAction SilentlyContinue).InstallPath,
+        'C:\Program Files (x86)\Steam'
+    ) | Where-Object { $_ } | ForEach-Object { Join-Path ($_ -replace '/', '\') 'steam.exe' } |
+        Where-Object { Test-Path $_ } | Select-Object -First 1
+
+    Step 'Steam sign-in (optional, and worth doing now)'
+    Write-Host '  Steam is open and updated. Signing in here saves the console account from'
+    Write-Host '  having to ask after the restart: the credential lives in a file shared by'
+    Write-Host '  every account on this machine, and only the "which account" pointer is'
+    Write-Host '  per user, which phase 2 sets for you.'
+    Write-Host ''
+    Write-Host '  Scanning the QR with the Steam mobile app is the quickest; Steam Guard'
+    Write-Host '  then authorises this machine once and never asks again.'
+    Write-Host ''
+
+    if ($steamPath) { Start-Process $steamPath }
+    Read-Host '  Sign in now if you like, then press Enter (or press Enter to skip)' | Out-Null
+}
+
 if ($warm) {
-    Step 'Closing the warm-up Steam'
-    $warm | Stop-Process -Force -ErrorAction SilentlyContinue
-    Write-Host '  its client update is already downloaded and shared, so the console'
-    Write-Host '  account starts an up-to-date client instead of waiting for one'
+    Step 'Closing Steam before the restart'
+    Get-Process steam, steamwebhelper -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+    Write-Host '  it must not be this session that owns it when the console account signs in'
 }
 
 # --- the two tasks that carry the rest without you ---------------------------

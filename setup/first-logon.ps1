@@ -48,6 +48,28 @@ function Get-SteamPathEarly {
 }
 
 $steamEarly = Get-SteamPathEarly
+
+# Inherit a sign-in done from another account. Steam keeps the credential in
+# config\loginusers.vdf, which lives in the install directory and is therefore
+# shared, while "which account signs in" is per Windows user. Copying just that
+# pointer is usually enough for this account to come up already signed in.
+if ($steamEarly) {
+    $steamKey = 'HKCU:\SOFTWARE\Valve\Steam'
+    $already = (Get-ItemProperty $steamKey -Name AutoLoginUser -ErrorAction SilentlyContinue).AutoLoginUser
+    if (-not $already) {
+        $vdfPath = Join-Path $steamEarly 'config\loginusers.vdf'
+        if (Test-Path $vdfPath) {
+            $account = ([regex]::Match((Get-Content $vdfPath -Raw), '"AccountName"\s+"([^"]+)"')).Groups[1].Value
+            if ($account) {
+                if (-not (Test-Path $steamKey)) { New-Item -Path $steamKey -Force | Out-Null }
+                New-ItemProperty -Path $steamKey -Name 'AutoLoginUser' -Value $account -PropertyType String -Force | Out-Null
+                New-ItemProperty -Path $steamKey -Name 'RememberPassword' -Value 1 -PropertyType DWord -Force | Out-Null
+                Write-Host "==> Reusing the Steam sign-in done earlier (account: $account)" -ForegroundColor Cyan
+            }
+        }
+    }
+}
+
 if ($steamEarly -and -not (Get-Process steam -ErrorAction SilentlyContinue)) {
     Write-Host '==> Starting Steam in the background so it updates itself while I work' -ForegroundColor Cyan
     # -silent: to the tray, so it does not take the screen while the rest runs
