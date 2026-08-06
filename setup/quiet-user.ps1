@@ -53,6 +53,11 @@ public static extern bool SystemParametersInfo(int action, int param, string val
     Write-Host "  no splash.png at $splash, leaving the background alone"
 }
 
+Write-Host 'Console QuickEdit off (a click in a console window pauses whatever it is running)...'
+# Default on, and it makes any console window look frozen the moment someone
+# clicks in it. On a machine driven with a mouse that reads as a crash.
+Set-RegValue 'HKCU:\Console' 'QuickEdit' 0
+
 Write-Host 'Screen saver off (a console never interrupts what is on screen)...'
 # The screen saver is per user and survives every power setting: without this it
 # still cuts in over a paused game or a film.

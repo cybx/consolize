@@ -10,10 +10,47 @@ It does the two things that only exist inside this account:
 A marker file in %LOCALAPPDATA% keeps it from running again. The scheduled task
 itself is removed by the SYSTEM finish task once the shell is replaced.
 #>
+param(
+    # Set when this script relaunched itself; see just below.
+    [switch]$Relaunched
+)
 $ErrorActionPreference = 'Continue'
 
 $here = $PSScriptRoot
 $marker = Join-Path $env:LOCALAPPDATA 'Consolize\first-logon-done'
+
+# --- stop a click from freezing this window ----------------------------------
+# The Windows console enables QuickEdit by default: clicking inside the window
+# enters selection mode and PAUSES the running program until Esc or Enter. On a
+# machine being driven with a mouse that is the most natural thing to do, and it
+# looks exactly like a hang, which is the worst thing this window could do.
+#
+# Console settings are read when the window is created, so turning it off has to
+# happen before that: set it, then start again in a fresh window, once.
+$consoleKey = 'HKCU:\Console'
+$quickEdit = (Get-ItemProperty $consoleKey -Name QuickEdit -ErrorAction SilentlyContinue).QuickEdit
+
+if (-not $Relaunched -and $quickEdit -ne 0) {
+    if (-not (Test-Path $consoleKey)) { New-Item -Path $consoleKey -Force | Out-Null }
+    New-ItemProperty -Path $consoleKey -Name 'QuickEdit' -Value 0 -PropertyType DWord -Force | Out-Null
+
+    # powershell.exe has its own console profile that would override the default
+    $psKey = Join-Path $consoleKey '%SystemRoot%_System32_WindowsPowerShell_v1.0_powershell.exe'
+    if (Test-Path $psKey) {
+        New-ItemProperty -Path $psKey -Name 'QuickEdit' -Value 0 -PropertyType DWord -Force | Out-Null
+    }
+
+    try {
+        Start-Process powershell -ArgumentList @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass',
+            '-File', "`"$PSCommandPath`"", '-Relaunched'
+        ) -ErrorAction Stop
+        return
+    } catch {
+        # not fatal: carry on in this window, a click will just pause it
+        Write-Warning "Could not restart in a click-proof window: $($_.Exception.Message)"
+    }
+}
 
 # What the SYSTEM finish task waits for: this account is ready to become a
 # console. setup-console.ps1 grants this account write access to that folder.
