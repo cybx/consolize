@@ -26,6 +26,34 @@ Write-Host '  consolize: finishing this account' -ForegroundColor Cyan
 Write-Host '  phase 2 of 3'
 Write-Host ''
 
+# --- start Steam updating now, in the background ------------------------------
+# A freshly installed client downloads a sizeable self-update the first time it
+# runs, and that used to happen at the moment we needed it, with the user
+# watching a still screen. Kick it off here instead, so it downloads while the
+# settings below are applied.
+#
+# Here rather than in phase 1 on purpose: phase 1 is elevated, and a Steam
+# launched from there writes into the shared install directory as an
+# administrator, which can leave files the console account cannot replace at the
+# next update.
+function Get-SteamPathEarly {
+    foreach ($dir in @(
+        (Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam' -Name InstallPath -ErrorAction SilentlyContinue).InstallPath,
+        (Get-ItemProperty 'HKLM:\SOFTWARE\Valve\Steam' -Name InstallPath -ErrorAction SilentlyContinue).InstallPath,
+        'C:\Program Files (x86)\Steam'
+    )) {
+        if ($dir -and (Test-Path (Join-Path ($dir -replace '/', '\') 'steam.exe'))) { return ($dir -replace '/', '\') }
+    }
+    return $null
+}
+
+$steamEarly = Get-SteamPathEarly
+if ($steamEarly -and -not (Get-Process steam -ErrorAction SilentlyContinue)) {
+    Write-Host '==> Starting Steam in the background so it updates itself while I work' -ForegroundColor Cyan
+    # -silent: to the tray, so it does not take the screen while the rest runs
+    try { Start-Process (Join-Path $steamEarly 'steam.exe') -ArgumentList '-silent' } catch { }
+}
+
 # --- per-user quiet settings -------------------------------------------------
 $quietUser = Join-Path $here 'quiet-user.ps1'
 if (Test-Path $quietUser) {
