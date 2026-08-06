@@ -149,12 +149,23 @@ and password**, which cannot be typed with a gamepad. An administrator account i
 asked only Yes or No, but the prompt is drawn on the secure desktop, which
 ignores injected input by design, so Steam's mouse emulation cannot click it.
 
-So [`console-elevation.ps1`](setup/console-elevation.ps1) does both halves: the
-console account becomes an administrator, and the prompt moves to the normal
-desktop where a controller can reach it. UAC itself stays on. The cost, stated
-plainly, is that the account running games can elevate with a click and the
-prompt loses the secure desktop's protection. Fine for one person's console in a
-living room; not for a shared machine. Setup asks, and you can decline.
+[`console-elevation.ps1`](setup/console-elevation.ps1) offers three answers, and
+all of them make the console account an administrator, without which none of
+them work:
+
+| | what it does |
+|---|---|
+| `off` (default) | UAC off entirely (`EnableLUA = 0`). Nothing ever asks, which is what a console does. Everything the account runs is elevated, Steam and games included. |
+| `quiet` | UAC on, but administrators elevate without being asked. No prompts, and processes still start unelevated. |
+| `prompt` | UAC on and still asking, moved off the secure desktop so an emulated mouse can answer. |
+
+The trade, plainly: `off` and `quiet` mean anything running as this account can
+gain administrator rights without you being asked. Reasonable for one person's
+console in a living room; not for a machine other people use. Setup asks, and
+leaving Windows alone is one of the answers.
+
+(`off` used to break Store and packaged apps. That was fixed in Windows 10 build
+15063, so it no longer applies here.)
 
 Everything else is covered up front rather than at runtime: the `runtimes` step
 installs every VC++ generation, DirectX, .NET and the rest precisely so a game

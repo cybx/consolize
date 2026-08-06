@@ -290,11 +290,16 @@ if ($Unattended) {
 
     Write-Host ''
     Write-Host "  Games with anticheat (Fortnite, Apex, Rainbow Six) install a service the"
-    Write-Host '  first time they run, which needs elevation. A standard account is asked for'
-    Write-Host '  an administrator password, which cannot be typed with a gamepad, so those'
-    Write-Host '  games never start. Making the console account an administrator turns that'
-    Write-Host '  into a Yes/No a controller can click.'
-    $adminAccount = Ask-Yes "Make '$UserName' an administrator?" $true
+    Write-Host '  first time they run, which needs elevation. Left alone, Windows either asks'
+    Write-Host '  for a password no gamepad can type, or asks on the secure desktop, which'
+    Write-Host '  ignores emulated mice. Either way the game never starts.'
+    Write-Host "  All three answers below make '$UserName' an administrator, without which"
+    Write-Host '  none of them work.'
+    $elevation = Ask-Choice 'Elevation?' `
+        (@{ off    = 'UAC off entirely: nothing ever asks, like a console'
+            quiet  = 'UAC on, but elevates without asking'
+            prompt = 'UAC on and asks, moved where a controller can answer'
+            none   = 'leave Windows alone (anticheat games will need a keyboard once)' }) 'off'
 
     Write-Host ''
     Write-Host '  Windows Firewall asks, with an elevated dialog, the first time a game opens'
@@ -316,7 +321,7 @@ if ($Unattended) {
         Aggressive  = $aggressive
         RestMode    = $restMode
         Autologon   = $autologon
-        AdminAccount = $adminAccount
+        Elevation   = $elevation
         Language    = $language
         Keyboard    = $keyboard
         Firewall    = $firewall
@@ -332,7 +337,7 @@ if ($Unattended) {
     Write-Host "  services        : $(if ($aggressive) { 'trimmed' } else { 'untouched' })"
     Write-Host "  power button    : $restMode"
     Write-Host "  autologon       : $(if ($autologon) { 'yes' } else { 'no' })"
-    Write-Host "  console account : $(if ($adminAccount) { 'administrator (anticheat games work)' } else { 'standard (they will need a keyboard once)' })"
+    Write-Host "  elevation       : $elevation$(if ($elevation -ne 'none') { ' (account becomes an administrator)' })"
     Write-Host ''
     Write-Host '  After this, the machine signs out, logs into the console account by itself,'
     Write-Host '  walks you through the Steam sign-in, then replaces the shell and reboots.'
@@ -475,9 +480,9 @@ else { & (Join-Path $here 'tune-performance.ps1') }
 Step 'Power: rest mode'
 & (Join-Path $here 'power-console.ps1') -RestMode $a.RestMode
 
-if ($a.AdminAccount) {
-    Step 'Elevation the console account can answer'
-    & (Join-Path $here 'console-elevation.ps1') -UserName $UserName
+if ($a.Elevation -and $a.Elevation -ne 'none') {
+    Step "Elevation ($($a.Elevation))"
+    & (Join-Path $here 'console-elevation.ps1') -UserName $UserName -Mode $a.Elevation
 }
 
 if ($a.Language) {
