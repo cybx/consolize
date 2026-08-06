@@ -50,9 +50,12 @@ function Set-RegValue {
 if ($Restore) {
     Write-Host 'Restoring the normal Windows boot experience...'
     bcdedit.exe /set '{globalsettings}' bootuxdisabled off | Out-Null
-    bcdedit.exe /deletevalue '{current}' quietboot 2>&1 | Out-Null
-    bcdedit.exe /deletevalue '{current}' bootstatuspolicy 2>&1 | Out-Null
-    bcdedit.exe /deletevalue '{current}' noerrordisplay 2>&1 | Out-Null
+    # An absent value already means restored. Do not merge native stderr into
+    # the success stream: PowerShell 5.1 turns it into a terminating error when
+    # ErrorActionPreference is Stop.
+    bcdedit.exe /deletevalue '{current}' quietboot 2>$null
+    bcdedit.exe /deletevalue '{current}' bootstatuspolicy 2>$null
+    bcdedit.exe /deletevalue '{current}' noerrordisplay 2>$null
     Remove-ItemProperty $logonUI -Name AnimationDisabled -ErrorAction SilentlyContinue
     Remove-ItemProperty $logonUI -Name BrandingNeutral -ErrorAction SilentlyContinue
     foreach ($name in @('BrandingNeutral', 'HideAutoLogonUI', 'AnimationDisabled')) {

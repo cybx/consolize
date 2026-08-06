@@ -56,8 +56,10 @@ if ($Restore) {
     }
 
     Write-Host 'Boot logo and spinner back...'
-    bcdedit.exe /deletevalue '{globalsettings}' bootuxdisabled 2>&1 | Out-Null
-    bcdedit.exe /deletevalue '{current}' quietboot 2>&1 | Out-Null
+    # Missing values are already restored. Suppress native stderr directly:
+    # 2>&1 becomes a terminating NativeCommandError under PowerShell 5.1 + EAP Stop.
+    bcdedit.exe /deletevalue '{globalsettings}' bootuxdisabled 2>$null
+    bcdedit.exe /deletevalue '{current}' quietboot 2>$null
 
     Write-Host ''
     Write-Host 'Done. A value that already existed with a different setting before consolize' -ForegroundColor Yellow

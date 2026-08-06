@@ -32,6 +32,17 @@ jobs:
         shell: pwsh
         run: ./scripts/test-shortcuts-vdf.ps1
 
+      # A clean Windows install has Windows PowerShell 5.1, not pwsh 7. The two
+      # engines differ in JSON array enumeration, native stderr and a few parser
+      # rules, so the installer must pass in the engine that actually runs it.
+      - name: Static checks in Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/check-scripts.ps1
+
+      - name: Steam shortcuts round trip in Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/test-shortcuts-vdf.ps1
+
   build:
     runs-on: windows-latest
     steps:

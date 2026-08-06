@@ -120,7 +120,10 @@ function Ensure-Winget {
 function Initialize-Winget {
     if ($script:WingetReady) { return }
     & winget list --source winget --accept-source-agreements *>$null
-    $help = (& winget install --help 2>&1) -join ' '
+    # Windows PowerShell 5.1 promotes merged native stderr to a terminating
+    # NativeCommandError under EAP Stop. winget help normally uses stdout, and
+    # losing a diagnostic line only means using the older compatible flags.
+    $help = (& winget install --help 2>$null) -join ' '
     $script:WingetInteractiveFlag = if ($help -match 'disable-interactivity') { @('--disable-interactivity') } else { @() }
     $script:WingetReady = $true
 }

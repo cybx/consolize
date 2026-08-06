@@ -34,7 +34,7 @@ $ErrorActionPreference = 'Stop'
 
 if ($Restore) {
     Write-Host 'Restoring Windows Firewall defaults...'
-    Set-NetFirewallProfile -Profile Domain, Private, Public `
+    Set-NetFirewallProfile -Name Domain, Private, Public `
         -Enabled True -DefaultInboundAction Block -NotifyOnListen True -ErrorAction SilentlyContinue
     Write-Host 'Firewall on, inbound blocked, notifications back.'
     return
@@ -42,7 +42,7 @@ if ($Restore) {
 
 if ($Off) {
     Write-Host 'Turning Windows Firewall off on every profile...'
-    Set-NetFirewallProfile -Profile Domain, Private, Public -Enabled False
+    Set-NetFirewallProfile -Name Domain, Private, Public -Enabled False
     Write-Warning 'No inbound filtering at all now, including from other devices on your'
     Write-Warning 'network. Defensible for a console behind a home router; not for a laptop'
     Write-Warning 'that travels. Undo with: .\firewall-console.ps1 -Restore'
@@ -52,13 +52,13 @@ if ($Off) {
 # --- quiet: no prompts, no blocking on the home network ---------------------
 
 Write-Host 'Firewall notifications off (that prompt is elevated, so a controller cannot answer it)...'
-Set-NetFirewallProfile -Profile Domain, Private, Public -NotifyOnListen False
+Set-NetFirewallProfile -Name Domain, Private, Public -NotifyOnListen False
 
 Write-Host 'Private profile: inbound allowed, so games do not have to ask...'
-Set-NetFirewallProfile -Profile Private -DefaultInboundAction Allow
+Set-NetFirewallProfile -Name Private -DefaultInboundAction Allow
 
 Write-Host 'Public and Domain: still blocking inbound'
-Set-NetFirewallProfile -Profile Public, Domain -DefaultInboundAction Block
+Set-NetFirewallProfile -Name Public, Domain -DefaultInboundAction Block
 
 # Which profile is in force depends on how the current network is classified,
 # and a console on a home LAN wants Private. Windows often lands on Public.
