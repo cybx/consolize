@@ -268,6 +268,14 @@ if ($Unattended) {
             Hibernate = 'hibernate: ~15s, survives power loss, only the case button wakes it' }) 'Sleep'
     $autologon = Ask-Yes "Log '$UserName' in automatically at boot (a console does not ask who you are)?" $true
 
+    Write-Host ''
+    Write-Host "  Games with anticheat (Fortnite, Apex, Rainbow Six) install a service the"
+    Write-Host '  first time they run, which needs elevation. A standard account is asked for'
+    Write-Host '  an administrator password, which cannot be typed with a gamepad, so those'
+    Write-Host '  games never start. Making the console account an administrator turns that'
+    Write-Host '  into a Yes/No a controller can click.'
+    $adminAccount = Ask-Yes "Make '$UserName' an administrator?" $true
+
     $a = [pscustomobject]@{
         UserName    = $UserName
         Launchers   = $launchers
@@ -280,6 +288,7 @@ if ($Unattended) {
         Aggressive  = $aggressive
         RestMode    = $restMode
         Autologon   = $autologon
+        AdminAccount = $adminAccount
         ShellMethod = $ShellMethod
     }
 
@@ -292,6 +301,7 @@ if ($Unattended) {
     Write-Host "  services        : $(if ($aggressive) { 'trimmed' } else { 'untouched' })"
     Write-Host "  power button    : $restMode"
     Write-Host "  autologon       : $(if ($autologon) { 'yes' } else { 'no' })"
+    Write-Host "  console account : $(if ($adminAccount) { 'administrator (anticheat games work)' } else { 'standard (they will need a keyboard once)' })"
     Write-Host ''
     Write-Host '  After this, the machine signs out, logs into the console account by itself,'
     Write-Host '  walks you through the Steam sign-in, then replaces the shell and reboots.'
@@ -433,6 +443,11 @@ else { & (Join-Path $here 'tune-performance.ps1') }
 
 Step 'Power: rest mode'
 & (Join-Path $here 'power-console.ps1') -RestMode $a.RestMode
+
+if ($a.AdminAccount) {
+    Step 'Elevation the console account can answer'
+    & (Join-Path $here 'console-elevation.ps1') -UserName $UserName
+}
 
 Step 'Emptying Windows startup'
 # -MachineOnly on purpose: HKCU here is the ADMINISTRATOR's, and silently

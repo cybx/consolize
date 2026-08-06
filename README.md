@@ -136,6 +136,30 @@ script and then runs the whole provisioning, asking before each part.
 You answer a short interview once. Everything after that is automatic, including
 the reboot and the account switch it needs.
 
+### What the console account is allowed to do
+
+It installs and plays games, pairs Bluetooth devices, joins wifi and switches
+audio output without any of that needing elevation. One thing does: games with
+kernel anticheat (Fortnite, Apex, Rainbow Six) install a system service the first
+time they run.
+
+That single case decides the account type, because Windows handles it in two
+unhelpful ways. A standard account is asked for an administrator's **username
+and password**, which cannot be typed with a gamepad. An administrator account is
+asked only Yes or No, but the prompt is drawn on the secure desktop, which
+ignores injected input by design, so Steam's mouse emulation cannot click it.
+
+So [`console-elevation.ps1`](setup/console-elevation.ps1) does both halves: the
+console account becomes an administrator, and the prompt moves to the normal
+desktop where a controller can reach it. UAC itself stays on. The cost, stated
+plainly, is that the account running games can elevate with a click and the
+prompt loses the secure desktop's protection. Fine for one person's console in a
+living room; not for a shared machine. Setup asks, and you can decline.
+
+Everything else is covered up front rather than at runtime: the `runtimes` step
+installs every VC++ generation, DirectX, .NET and the rest precisely so a game
+never has to install a prerequisite mid-launch.
+
 ### Two accounts, and why
 
 The account Windows was installed with keeps the normal desktop and stays your
