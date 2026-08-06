@@ -295,11 +295,14 @@ if (-not (Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue)) {
 
     # -NoPassword and -PasswordNeverExpires live in different parameter sets,
     # so they cannot be splatted together.
+    # FullName matches the account name on purpose: the logon screen shows the
+    # display name, so a FullName of "Console" put a user called "Console" on
+    # screen while every command and every doc says "gamer".
     if ($password -and $password.Length -gt 0) {
-        New-LocalUser -Name $UserName -Password $password -FullName 'Console' `
+        New-LocalUser -Name $UserName -Password $password -FullName $UserName `
             -Description 'consolize console account' -PasswordNeverExpires | Out-Null
     } else {
-        New-LocalUser -Name $UserName -NoPassword -FullName 'Console' `
+        New-LocalUser -Name $UserName -NoPassword -FullName $UserName `
             -Description 'consolize console account' | Out-Null
         Write-Host '  created with no password'
     }
@@ -322,6 +325,15 @@ if ($account -and -not $account.PasswordLastSet) {
     }
 }
 try { Set-LocalUser -Name $UserName -PasswordNeverExpires $true -ErrorAction Stop } catch { }
+
+# Earlier runs set the display name to "Console", which is what the logon screen
+# shows; make it match the account name so the screen and the docs agree.
+if ($account -and $account.FullName -eq 'Console') {
+    try {
+        Set-LocalUser -Name $UserName -FullName $UserName -ErrorAction Stop
+        Write-Host "  display name corrected from 'Console' to '$UserName'"
+    } catch { }
+}
 
 $otherAdmins = Get-LocalGroupMember -Group 'Administrators' -ErrorAction SilentlyContinue |
     Where-Object { $_.ObjectClass -eq 'User' -and $_.Name -notlike "*\$UserName" }
