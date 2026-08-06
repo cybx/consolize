@@ -1,14 +1,14 @@
 <#
 consolize one-line installer.
 
-    irm https://raw.githubusercontent.com/cybx/consolize/main/get.ps1 | iex
+    irm https://get-consolize.cybx.dev | iex
 
 Downloads consolize.exe (latest release) plus the setup scripts, installs them
 to C:\Program Files\Consolize, and offers to run the provisioning right away.
 
 Options, when piping is not enough:
 
-    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/cybx/consolize/main/get.ps1))) -DownloadOnly
+    & ([scriptblock]::Create((irm https://get-consolize.cybx.dev))) -DownloadOnly
     & ([scriptblock]::Create((irm .../get.ps1))) -Ref v0.1.0
 #>
 param(
@@ -24,6 +24,12 @@ param(
     # copy taken at install time, so a fix published later does not reach a
     # machine until they are pulled again.
     [switch]$UpdateOnly,
+    # Where the elevated window re-fetches this script from. The short domain is
+    # a Cloudflare Worker in front of the same file, serving it with no-store, so
+    # a fix published a minute ago is the one that runs. raw.githubusercontent
+    # caches for minutes, which is long enough to run yesterday's code by
+    # accident. A fork passing -Repo or -Ref gets the raw URL instead.
+    [string]$SelfUrl = 'https://get-consolize.cybx.dev',
     [switch]$NoElevate
 )
 $ErrorActionPreference = 'Stop'
@@ -45,7 +51,11 @@ Write-Host ''
 # no script file to re-launch, so the elevated session re-fetches this same
 # script and replays the parameters, base64 encoded to dodge quoting entirely.
 if (-not (Test-Admin) -and -not $DownloadOnly -and -not $NoElevate) {
-    $selfUrl = "https://raw.githubusercontent.com/$Repo/$Ref/get.ps1"
+    $relaunchUrl = if ($PSBoundParameters.ContainsKey('Repo') -or $PSBoundParameters.ContainsKey('Ref')) {
+        "https://raw.githubusercontent.com/$Repo/$Ref/get.ps1"
+    } else {
+        $SelfUrl
+    }
 
     $replay = foreach ($p in $PSBoundParameters.GetEnumerator()) {
         if ($p.Value -is [switch]) {
@@ -55,7 +65,7 @@ if (-not (Test-Admin) -and -not $DownloadOnly -and -not $NoElevate) {
         }
     }
 
-    $inner = "& ([scriptblock]::Create((Invoke-RestMethod '$selfUrl'))) $($replay -join ' ')"
+    $inner = "& ([scriptblock]::Create((Invoke-RestMethod '$relaunchUrl'))) $($replay -join ' ')"
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
 
     Write-Host 'Administrator rights are needed (Program Files, services, registry, shell).'
@@ -65,7 +75,7 @@ if (-not (Test-Admin) -and -not $DownloadOnly -and -not $NoElevate) {
             '-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded
     } catch {
         Write-Warning 'Elevation was declined. Open PowerShell as administrator and run the one-liner again:'
-        Write-Host "    irm $selfUrl | iex"
+        Write-Host "    irm $relaunchUrl | iex"
     }
     return
 }

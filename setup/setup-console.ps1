@@ -481,7 +481,7 @@ task would run it as SYSTEM at every logon. Refusing.
 This is what an install under C:\ProgramData looks like: that tree grants
 BUILTIN\Users Write. Reinstall to the safe location and resume:
 
-  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/cybx/consolize/main/get.ps1))) -UpdateOnly
+  & ([scriptblock]::Create((irm https://get-consolize.cybx.dev))) -UpdateOnly
   cd 'C:\Program Files\Consolize\setup'
   .\setup-console.ps1 -Unattended
 "@

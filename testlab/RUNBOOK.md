@@ -7,7 +7,7 @@ End-to-end test of consolize in a throwaway VM, before touching real hardware.
 Everything below is the detail. In practice, from a clean Windows install:
 
 ```powershell
-irm https://raw.githubusercontent.com/cybx/consolize/main/get.ps1 | iex
+irm https://get-consolize.cybx.dev | iex
 ```
 
 Answer the interview. Give the console account a real password rather than
@@ -73,7 +73,7 @@ Restore-VMSnapshot -VMName consolize-lab -Name clean-install -Confirm:$false
 If the guest has internet, that is the whole step (admin PowerShell in the guest):
 
 ```powershell
-irm https://raw.githubusercontent.com/cybx/consolize/main/get.ps1 | iex
+irm https://get-consolize.cybx.dev | iex
 ```
 
 Offline guest? Push the files from the host instead:

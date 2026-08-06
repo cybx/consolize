@@ -81,7 +81,7 @@ No `Winlogon\Shell` registry rewrite, no scheduled task launching a VBS that lau
 On the machine that will become the console:
 
 ```powershell
-irm https://raw.githubusercontent.com/cybx/consolize/main/get.ps1 | iex
+irm https://get-consolize.cybx.dev | iex
 ```
 
 No need to open PowerShell as administrator: it asks for elevation itself and
@@ -92,7 +92,7 @@ later does not reach it on its own. To pull the current ones without starting
 over:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/cybx/consolize/main/get.ps1))) -UpdateOnly
+& ([scriptblock]::Create((irm https://get-consolize.cybx.dev))) -UpdateOnly
 ``` It installs `consolize.exe` plus every setup
 script and then runs the whole provisioning, asking before each part.
 
