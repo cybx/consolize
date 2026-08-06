@@ -108,9 +108,17 @@ if (Test-Path $answersPath) {
 # leaving the frontend to answer a question about the frontend, so: detect it
 # automatically, and when a question is unavoidable, ask in a topmost dialog
 # that draws over it.
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-Add-Type @'
+# Compiled on first use, not at startup: Windows PowerShell shells out to the C#
+# compiler for this, which on a cold VM is slow enough to look like a hang, and
+# an account that is not using Steam never needs it at all.
+$script:uiReady = $false
+function Initialize-UiHelpers {
+    if ($script:uiReady) { return }
+    Write-Host '  preparing the on-screen helpers (slow the first time, it compiles)...' -ForegroundColor DarkGray
+
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    Add-Type @'
 using System;
 using System.Runtime.InteropServices;
 public static class ConsolizeWin32
@@ -124,9 +132,13 @@ public static class ConsolizeWin32
 }
 '@ -ErrorAction SilentlyContinue
 
+    $script:uiReady = $true
+}
+
 function Test-FrontendOnScreen {
     param([string[]]$ProcessNames = @('steam', 'steamwebhelper'))
 
+    Initialize-UiHelpers
     $handle = [ConsolizeWin32]::GetForegroundWindow()
     if ($handle -eq [IntPtr]::Zero) { return $false }
 
@@ -148,6 +160,7 @@ function Test-FrontendOnScreen {
 function Show-TopmostQuestion {
     param([string]$Text, [string]$Caption = 'consolize')
 
+    Initialize-UiHelpers
     $owner = New-Object System.Windows.Forms.Form
     $owner.TopMost = $true
     $owner.ShowInTaskbar = $false
