@@ -93,24 +93,62 @@ if (-not $userDirs) {
     return
 }
 
+# Counts entries already in the file. Every shortcut carries exactly one
+# AppName field, so counting those counts entries, without parsing the rest.
+function Get-VdfEntryCount {
+    param([byte[]]$Bytes)
+    $needle = @(1) + [Text.Encoding]::UTF8.GetBytes('AppName') + @(0)
+    $count = 0
+    for ($i = 0; $i -le $Bytes.Length - $needle.Length; $i++) {
+        $match = $true
+        for ($j = 0; $j -lt $needle.Length; $j++) {
+            if ($Bytes[$i + $j] -ne $needle[$j]) { $match = $false; break }
+        }
+        if ($match) { $count++ }
+    }
+    return $count
+}
+
 foreach ($userDir in $userDirs) {
     $configDir = Join-Path $userDir.FullName 'config'
     New-Item -ItemType Directory -Force -Path $configDir | Out-Null
     $vdf = Join-Path $configDir 'shortcuts.vdf'
 
+    # Appending, not replacing. Steam creates this file on its own, so refusing
+    # whenever it existed meant the entries were almost never written, and the
+    # library came up without a way to reach the desktop.
+    $keep = $null
+    $firstIndex = 0
+
     if (Test-Path $vdf) {
-        $existing = [IO.File]::ReadAllBytes($vdf)
-        if ([Text.Encoding]::UTF8.GetString($existing) -match 'Desktop Mode') {
+        $bytes = [IO.File]::ReadAllBytes($vdf)
+
+        if ([Text.Encoding]::UTF8.GetString($bytes) -match 'Desktop Mode') {
             Write-Host "  $($userDir.Name): already has the Desktop Mode entry, leaving it alone."
             continue
         }
+
+        # A well-formed file ends with the byte that closes the shortcuts map.
+        # Anything else is a shape this does not understand, and a library full
+        # of someone's shortcuts is not worth guessing about.
+        if ($bytes.Length -lt 12 -or $bytes[$bytes.Length - 1] -ne 8) {
+            Write-Warning "  $($userDir.Name): shortcuts.vdf is not in the expected shape, leaving it alone."
+            Write-Warning "  Add them from Big Picture instead: $ConsolizeExe   arguments: send desktop"
+            continue
+        }
+
         $backup = "$vdf.consolize-backup"
         if (-not (Test-Path $backup)) { Copy-Item $vdf $backup }
-        Write-Warning "  $($userDir.Name): this profile already has non-Steam shortcuts."
-        Write-Warning "  Backed up to $backup, but adding entries to an existing file is not"
-        Write-Warning '  supported here. Add "Desktop Mode" from Big Picture instead:'
-        Write-Warning "    target: $ConsolizeExe   arguments: send desktop"
-        continue
+
+        $firstIndex = Get-VdfEntryCount -Bytes $bytes
+
+        # Everything except the closing byte, so new entries go before it.
+        # Array.Copy, not $bytes[0..n]: range indexing yields Object[], which
+        # BinaryWriter does not write as bytes, and the existing shortcuts came
+        # out mangled. Caught by round-tripping the result.
+        $keep = New-Object byte[] ($bytes.Length - 1)
+        [Array]::Copy($bytes, $keep, $bytes.Length - 1)
+        Write-Host "  $($userDir.Name): $firstIndex shortcut(s) already there, adding to them (backup: $(Split-Path $backup -Leaf))"
     }
 
     $entries = @(
@@ -121,14 +159,20 @@ foreach ($userDir in $userDirs) {
     $stream = [IO.File]::Open($vdf, 'Create')
     $w = New-Object System.IO.BinaryWriter($stream)
     try {
-        $w.Write([byte]0)
-        $w.Write([Text.Encoding]::UTF8.GetBytes('shortcuts')); $w.Write([byte]0)
+        if ($keep) {
+            # everything that was there, minus its closing byte
+            $w.Write($keep)
+        } else {
+            $w.Write([byte]0)
+            $w.Write([Text.Encoding]::UTF8.GetBytes('shortcuts')); $w.Write([byte]0)
+        }
 
         for ($i = 0; $i -lt $entries.Count; $i++) {
             $entry = $entries[$i]
+            $index = $firstIndex + $i
 
             $w.Write([byte]0)
-            $w.Write([Text.Encoding]::UTF8.GetBytes("$i")); $w.Write([byte]0)
+            $w.Write([Text.Encoding]::UTF8.GetBytes("$index")); $w.Write([byte]0)
 
             Add-VdfString $w 'AppName' $entry.Name
             Add-VdfString $w 'Exe' "`"$ConsolizeExe`""

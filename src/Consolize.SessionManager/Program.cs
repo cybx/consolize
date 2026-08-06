@@ -48,6 +48,11 @@ internal sealed record AppConfig
 
     public bool SplashEnabled { get; init; } = true;
 
+    /// <summary>Leaving Big Picture without closing Steam leaves a windowed
+    /// client over nothing, since no desktop is running behind it. When nothing
+    /// fills the screen for this long, bring the desktop up. 0 disables it.</summary>
+    public int DesktopWhenNothingFillsScreenSeconds { get; init; } = 20;
+
     /// <summary>Upper bound: the splash also closes as soon as the frontend
     /// puts a window on screen.</summary>
     public int SplashSeconds { get; init; } = 12;
@@ -264,8 +269,101 @@ internal static class Program
         Log($"session manager starting (pid {Environment.ProcessId}, frontend '{_config.Frontend}')");
 
         _ = Task.Run(() => PipeServerLoop(Cts.Token));
+        _ = Task.Run(() => EmptyScreenLoop(Cts.Token));
         WatchdogLoop(Cts.Token);
         Log("session manager exiting");
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr param);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr window);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr window, out Rect rect);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int index);
+
+    private delegate bool EnumWindowsProc(IntPtr window, IntPtr param);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct Rect { public int Left, Top, Right, Bottom; }
+
+    /// <summary>Is any visible window covering the screen? In console mode
+    /// something always should be: the frontend, or a game.</summary>
+    private static bool SomethingFillsTheScreen()
+    {
+        var screenWidth = GetSystemMetrics(0);
+        var screenHeight = GetSystemMetrics(1);
+        if (screenWidth == 0 || screenHeight == 0) return true;   // no display; do not act
+
+        var covered = false;
+        EnumWindows((window, _) =>
+        {
+            if (!IsWindowVisible(window)) return true;
+            if (!GetWindowRect(window, out var rect)) return true;
+
+            var width = rect.Right - rect.Left;
+            var height = rect.Bottom - rect.Top;
+            if (width >= screenWidth * 0.9 && height >= screenHeight * 0.9)
+            {
+                covered = true;
+                return false;   // stop enumerating
+            }
+            return true;
+        }, IntPtr.Zero);
+
+        return covered;
+    }
+
+    /// <summary>
+    /// Leaving Big Picture does not close Steam: it leaves a windowed client on
+    /// top of nothing, because no desktop is running behind it. That reads as a
+    /// black screen with a stray window in it, and there is no way out with a
+    /// controller. Treat it as a request for the desktop.
+    /// </summary>
+    private static void EmptyScreenLoop(CancellationToken ct)
+    {
+        var threshold = _config.DesktopWhenNothingFillsScreenSeconds;
+        if (threshold <= 0) return;
+
+        var emptyFor = 0;
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                SleepCancellable(ct, TimeSpan.FromSeconds(2));
+                if (ct.IsCancellationRequested) return;
+
+                // Only in console mode: on the desktop, windowed is normal.
+                if (_mode != SessionMode.Console || ExplorerRunningInThisSession())
+                {
+                    emptyFor = 0;
+                    continue;
+                }
+
+                if (SomethingFillsTheScreen())
+                {
+                    emptyFor = 0;
+                    continue;
+                }
+
+                emptyFor += 2;
+                if (emptyFor >= threshold)
+                {
+                    Log($"nothing has filled the screen for {emptyFor}s (Big Picture closed?), opening the desktop");
+                    EnterDesktop();
+                    emptyFor = 0;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"empty-screen watcher failed (ignored): {ex.Message}");
+                emptyFor = 0;
+            }
+        }
     }
 
     private static AppConfig LoadOrCreateConfig()

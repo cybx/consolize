@@ -233,6 +233,16 @@ if ($Unattended) {
     }
 
     Write-Host ''
+    Write-Host 'LANGUAGE' -ForegroundColor Yellow
+    $currentLang = (Get-WinUserLanguageList | Select-Object -First 1).LanguageTag
+    $currentTz = (Get-TimeZone).Id
+    Write-Host "  Now: $currentLang, keyboard $(((Get-WinUserLanguageList | Select-Object -First 1).InputMethodTips) -join ','), time zone $currentTz"
+    Write-Host '  The keyboard layout matters more than it looks: it decides what comes out'
+    Write-Host '  when you type the Steam password on the on-screen keyboard.'
+    $language = Read-Host "  language tag to use, e.g. pt-BR (Enter to keep $currentLang)"
+    if ([string]::IsNullOrWhiteSpace($language)) { $language = $null }
+
+    Write-Host ''
     Write-Host 'LAUNCHERS' -ForegroundColor Yellow
     $launchers = @()
     if (Ask-Yes 'Install Steam (Big Picture, the controller-first default)?' $true) { $launchers += 'steam' }
@@ -297,6 +307,7 @@ if ($Unattended) {
         RestMode    = $restMode
         Autologon   = $autologon
         AdminAccount = $adminAccount
+        Language    = $language
         Firewall    = $firewall
         ShellMethod = $ShellMethod
     }
@@ -456,6 +467,13 @@ Step 'Power: rest mode'
 if ($a.AdminAccount) {
     Step 'Elevation the console account can answer'
     & (Join-Path $here 'console-elevation.ps1') -UserName $UserName
+}
+
+if ($a.Language) {
+    # Early: it downloads a language pack, and every account created afterwards
+    # inherits the result, which is the point.
+    Step "Language and keyboard ($($a.Language))"
+    & (Join-Path $here 'locale-console.ps1') -Language $a.Language
 }
 
 Step 'Firewall'
