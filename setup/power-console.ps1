@@ -66,20 +66,93 @@ if ($ListWakeDevices) {
     return
 }
 
+# What the machine looked like before, written down before anything is changed.
+# Without this, -Restore wrote its "defaults" into the Ultimate Performance
+# scheme this script creates and then re-activated that scheme, so the owner was
+# told power was back to normal while the console scheme was still driving the
+# machine and a full size hiberfil.sys still had tens of gigabytes of the disk.
+$stateFile = Join-Path $env:ProgramData 'Consolize\power-before.json'
+
+function Save-PowerState {
+    $active = ((powercfg /getactivescheme) -join ' ') -replace '.*GUID:\s*([0-9a-fA-F-]+).*', '$1'
+    $hibernateOn = ((powercfg /availablesleepstates) -join ' ') -match 'Hibernate'
+    $hiberboot = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' `
+        -Name HiberbootEnabled -ErrorAction SilentlyContinue).HiberbootEnabled
+
+    $state = [pscustomobject]@{
+        ActiveScheme   = $active
+        HibernateWasOn = [bool]$hibernateOn
+        HiberbootWas   = $hiberboot
+        SavedAt        = (Get-Date).ToString('o')
+    }
+    New-Item -ItemType Directory -Force -Path (Split-Path $stateFile) | Out-Null
+    # Written once. A second run would record the console's own settings as
+    # though they were the machine's, and then there is nothing to go back to.
+    if (-not (Test-Path $stateFile)) {
+        $state | ConvertTo-Json | Set-Content $stateFile
+        Write-Host "  previous power state recorded in $stateFile"
+    }
+    return $state
+}
+
 if ($Restore) {
-    Write-Host 'Restoring Windows power defaults...'
-    Invoke-PowerCfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS PBUTTONACTION 3
-    Invoke-PowerCfg /setacvalueindex SCHEME_CURRENT SUB_NONE CONSOLELOCK 1
-    Invoke-PowerCfg /setacvalueindex SCHEME_CURRENT SUB_SLEEP AWAYMODE 0
+    Write-Host 'Restoring Windows power settings...'
+
+    $before = $null
+    if (Test-Path $stateFile) {
+        try { $before = Get-Content $stateFile -Raw | ConvertFrom-Json } catch { }
+    }
+
+    # AC and DC both: a laptop or handheld keeps console behaviour on battery
+    # otherwise, while its owner believes power is back to normal.
+    foreach ($rail in @('setacvalueindex', 'setdcvalueindex')) {
+        Invoke-PowerCfg "/$rail" SCHEME_CURRENT SUB_BUTTONS PBUTTONACTION 3
+        Invoke-PowerCfg "/$rail" SCHEME_CURRENT SUB_BUTTONS SBUTTONACTION 1
+        Invoke-PowerCfg "/$rail" SCHEME_CURRENT SUB_BUTTONS LIDACTION 1
+        Invoke-PowerCfg "/$rail" SCHEME_CURRENT SUB_NONE CONSOLELOCK 1
+        Invoke-PowerCfg "/$rail" SCHEME_CURRENT SUB_SLEEP AWAYMODE 0
+        Invoke-PowerCfg "/$rail" SCHEME_CURRENT SUB_SLEEP RTCWAKE 1
+        # USB selective suspend back on
+        Invoke-PowerCfg "/$rail" SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 1
+    }
     Invoke-PowerCfg /change monitor-timeout-ac 10
     Invoke-PowerCfg /change standby-timeout-ac 30
     Invoke-PowerCfg /change disk-timeout-ac 20
-    Invoke-PowerCfg /setacvalueindex SCHEME_CURRENT SUB_SLEEP RTCWAKE 1
-    Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' -Name HiberbootEnabled -Value 1
-    Invoke-PowerCfg /setactive SCHEME_CURRENT
+    Invoke-PowerCfg /change hibernate-timeout-ac 180
+
+    $hiberboot = if ($before -and $null -ne $before.HiberbootWas) { $before.HiberbootWas } else { 1 }
+    Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' -Name HiberbootEnabled -Value $hiberboot
+
+    if ($before) {
+        if ($before.ActiveScheme) {
+            Invoke-PowerCfg /setactive $before.ActiveScheme
+            Write-Host "  back on the power scheme that was active before ($($before.ActiveScheme))"
+        }
+        if (-not $before.HibernateWasOn) {
+            # A full hiberfil.sys is the size of RAM. Leaving 32 GB of a 256 GB
+            # console SSD spoken for, on a machine that never hibernated before,
+            # is not a small thing to leave behind.
+            Invoke-PowerCfg /hibernate off
+            Write-Host '  hibernation off again, and hiberfil.sys released'
+        }
+        # The duplicated Ultimate Performance scheme is this script's own
+        # creation, so it goes with it. Never the active one by this point.
+        $ultimateGuid = 'e9a42b02-d5df-448d-aa00-03f14749eb61'
+        if ($before.ActiveScheme -and $before.ActiveScheme -ne $ultimateGuid) {
+            Invoke-PowerCfg -delete $ultimateGuid
+        }
+        Remove-Item $stateFile -Force -ErrorAction SilentlyContinue
+    } else {
+        Write-Warning '  no record of the previous power state, so the scheme and hibernation'
+        Write-Warning '  are left as they are. Pick a plan in Settings > System > Power if the'
+        Write-Warning '  machine is still on the console one.'
+    }
+
     Write-Host 'Power settings restored.'
     return
 }
+
+$null = Save-PowerState
 
 Write-Host "Rest mode: $RestMode"
 Write-Host '  power button, sleep button and Start menu power action'

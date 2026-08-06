@@ -200,6 +200,64 @@ it and the frontend would never start. Install it while signed in as $UserName.
     'custom' { Write-Check WARN 'Custom frontend' 'Check CustomCommand in %LOCALAPPDATA%\Consolize\config.json yourself.' }
 }
 
+# --- a way out of the frontend ----------------------------------------------
+# The last check to be added and arguably the one that matters most. Everything
+# above can pass on a machine that boots into Big Picture with no Desktop Mode
+# entry in the library, and that machine has no way to reach Windows with a
+# controller: the tray icon only exists once the desktop is already up. This
+# used to be approved and shipped.
+if ($Frontend -eq 'steam') {
+    $steamRoot = Get-UserHiveValue -User $UserName -SubKey 'SOFTWARE\Valve\Steam' -Name 'SteamPath'
+    if ($steamRoot) { $steamRoot = $steamRoot -replace '/', '\' }
+    if (-not $steamRoot -or -not (Test-Path $steamRoot)) { $steamRoot = 'C:\Program Files (x86)\Steam' }
+
+    $found = @()
+    foreach ($profile in @(Get-ChildItem (Join-Path $steamRoot 'userdata') -Directory -ErrorAction SilentlyContinue |
+                           Where-Object { $_.Name -ne '0' })) {
+        $vdf = Join-Path $profile.FullName 'config\shortcuts.vdf'
+        if (-not (Test-Path $vdf)) { continue }
+
+        # Only the names, and only the ones Steam will actually load: a name can
+        # sit in a file whose shortcuts map already closed, where Steam never
+        # looks for it, and reading the bytes flat would call that present.
+        $bytes = [IO.File]::ReadAllBytes($vdf)
+        $pos = 0; $depth = 1
+        try {
+            while ($pos -lt $bytes.Length) {
+                $type = $bytes[$pos]; $pos++
+                if ($type -eq 8) { $depth--; continue }
+                $start = $pos
+                while ($pos -lt $bytes.Length -and $bytes[$pos] -ne 0) { $pos++ }
+                $key = [Text.Encoding]::UTF8.GetString($bytes, $start, $pos - $start); $pos++
+                if ($type -eq 0) { $depth++ }
+                elseif ($type -eq 1) {
+                    $start = $pos
+                    while ($pos -lt $bytes.Length -and $bytes[$pos] -ne 0) { $pos++ }
+                    if ($key -eq 'AppName' -and $depth -eq 3) {
+                        $found += [Text.Encoding]::UTF8.GetString($bytes, $start, $pos - $start)
+                    }
+                    $pos++
+                }
+                elseif ($type -eq 2) { $pos += 4 }
+                else { break }
+            }
+        } catch { }
+    }
+
+    if ($found -contains 'Desktop Mode') {
+        Write-Check PASS 'Desktop Mode is in the Steam library' 'the console has a way back to Windows'
+    } else {
+        Write-Check FAIL 'No Desktop Mode entry in the Steam library' @'
+This machine would boot into Big Picture with no way to reach Windows using
+only a controller. Fix:
+  .\add-console-shortcuts.ps1 -Force
+and if the library already has strays from an earlier run:
+  .\add-console-shortcuts.ps1 -Remove -Force
+  .\add-console-shortcuts.ps1 -Force
+'@
+    }
+}
+
 # --- nothing else fighting for the logon ------------------------------------
 $autostart = @()
 foreach ($key in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run')) {

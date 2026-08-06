@@ -113,7 +113,7 @@ No `Winlogon\Shell` registry rewrite, no scheduled task launching a VBS that lau
 | F3 | Power: rest mode (sleep/hibernate profile, wake by controller, no core parking) | **first pass in `setup/`** |
 | F4 | Controller-first quick settings (Bluetooth pairing, audio output, volume, wifi) without touching a desktop | **shipped** |
 | F0 | Provisioning: gaming bootstrap (GPU driver, runtimes, updates) + `autounattend.xml` | **bootstrap in `setup/`**, autounattend pending |
-| F5 | Remote maintenance (OpenSSH, second admin account, clean uninstall) | partly: `rescue.ps1` handles the recovery half |
+| F5 | Remote maintenance (OpenSSH, second admin account, clean uninstall) | uninstall and recovery done: `uninstall-console.ps1`, `rescue.ps1`. Remote access still open |
 
 ## Install
 
@@ -216,6 +216,30 @@ powershell -ExecutionPolicy Bypass -File "C:\Program Files\Consolize\setup\rescu
 That gives back the logon screen, the desktop and the boot messages in one go,
 and cancels anything still scheduled. The logon screen is only hidden at the very
 end of a successful setup, precisely so a failure never hides the way back in.
+
+### Taking it back off
+
+`rescue.ps1` is for a setup that went wrong, and only undoes what can hide the
+screen. To remove consolize entirely:
+
+```powershell
+& 'C:\Program Files\Consolize\setup\uninstall-console.ps1'
+```
+
+It puts the shell back first, so a failure in any later step still leaves a
+machine you can sign into, then restores Defender, the firewall, UAC, the power
+plan, startup and the quiet layers, and removes the scheduled tasks, the Steam
+library entries and the installed files. Add `-WhatIfOnly` to see the plan
+without doing it.
+
+The console account is **kept** unless you pass `-RemoveAccount`, because it
+owns the Steam library, the saves and the screenshots. `-RemoveAccount
+-DeleteProfile` takes those too.
+
+Anything already back to normal is skipped, so running it twice is safe. What it
+cannot recover is a setting that already had a non-default value before
+consolize ran: those were overwritten without being recorded, and the script
+says so rather than pretending otherwise.
 
 Everything below is the manual/from-source path; each script also works alone.
 

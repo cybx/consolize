@@ -294,9 +294,38 @@ if ($bootInto -ne 'steam') {
         $confirm = Read-Host '  Did it open and look usable? [Y/n]'
         $script:loginConfirmed = $confirm -notmatch '^[nN]'
     } else {
+        # Playnite and Hydra install per user with no machine-wide option, so
+        # installing them in phase 1 put them in the administrator's profile,
+        # where this account cannot see them: the watchdog then found no
+        # frontend and the console booted to a bare desktop. Here we ARE the
+        # console account, which is the only place these can land correctly.
         Write-Warning "  $bootInto is not installed for this account ($frontendPath)."
-        Write-Warning '  Launchers other than Steam install per user, so install it while'
-        Write-Warning '  signed in here, then run this script again.'
+        $package = switch ($bootInto) {
+            'playnite' { 'Playnite.Playnite' }
+            'hydra'    { 'Hydra.Hydra' }
+            default    { $null }
+        }
+        if ($package -and (Get-Command winget -ErrorAction SilentlyContinue)) {
+            Write-Host "  installing it here, into this account (winget: $package)..." -ForegroundColor Cyan
+            try {
+                winget install --id $package --source winget -e --silent `
+                    --accept-package-agreements --accept-source-agreements
+            } catch {
+                Write-Warning "  winget failed: $($_.Exception.Message)"
+            }
+            if ($frontendPath -and (Test-Path $frontendPath)) {
+                Write-Host "  installed: $frontendPath"
+                Start-Process $frontendPath
+                Start-Sleep -Seconds 10
+                $confirm = Read-Host '  Did it open and look usable? [Y/n]'
+                $script:loginConfirmed = $confirm -notmatch '^[nN]'
+            } else {
+                Write-Warning "  still not at $frontendPath after the install."
+            }
+        } else {
+            Write-Warning '  Launchers other than Steam install per user, so install it while'
+            Write-Warning '  signed in here, then run this script again.'
+        }
     }
 } elseif (-not $steam) {
     Write-Warning 'Steam is not installed. Run bootstrap-gaming.ps1 as admin first.'
