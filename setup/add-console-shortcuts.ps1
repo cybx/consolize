@@ -113,6 +113,7 @@ function Read-ShortcutsVdf {
     $pos = 0
     $depth = 1   # the root map is open before the first byte
     $current = $null
+    $inTags = $false
 
     while ($pos -lt $Bytes.Length) {
         $type = $Bytes[$pos]; $pos++
@@ -120,6 +121,7 @@ function Read-ShortcutsVdf {
         if ($type -eq 8) {
             $depth--
             if ($depth -lt 0) { throw "a closing byte at $($pos - 1) with no map open" }
+            if ($depth -eq 3) { $inTags = $false }
             if ($depth -eq 2 -and $current) {
                 # the byte that just closed this entry is its last one
                 $current.End = $pos - 1
@@ -146,9 +148,11 @@ function Read-ShortcutsVdf {
                     # which is what lets one be copied over or dropped whole
                     $current = [pscustomobject]@{
                         Index = $key; Name = $null; AppId = $null
+                        Exe = $null; Icon = $null; LaunchOptions = $null; Tags = @()
                         Start = $keyStart - 1; End = -1
                     }
                 }
+                if ($depth -eq 3 -and $key -eq 'tags') { $inTags = $true }
                 $depth++
             }
             1 {
@@ -156,9 +160,19 @@ function Read-ShortcutsVdf {
                 while ($pos -lt $Bytes.Length -and $Bytes[$pos] -ne 0) { $pos++ }
                 if ($pos -ge $Bytes.Length) { throw "the value of '$key' runs past the end of the file" }
                 $value = [Text.Encoding]::UTF8.GetString($Bytes, $valStart, $pos - $valStart); $pos++
-                if ($key -eq 'AppName' -and $depth -eq 3) {
-                    $names.Add($value)
-                    if ($current) { $current.Name = $value }
+                if ($current -and $inTags -and $depth -eq 4) {
+                    $current.Tags += $value
+                } elseif ($depth -eq 3) {
+                    if ($key -eq 'AppName') {
+                        $names.Add($value)
+                        if ($current) { $current.Name = $value }
+                    } elseif ($current) {
+                        switch ($key) {
+                            'Exe'           { $current.Exe = $value }
+                            'icon'          { $current.Icon = $value }
+                            'LaunchOptions' { $current.LaunchOptions = $value }
+                        }
+                    }
                 }
             }
             2 {
@@ -209,6 +223,9 @@ function Get-ShortcutAppId {
 
 $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $updateScript = Join-Path $PSScriptRoot 'update-console.ps1'
+
+$iconFile = Join-Path (Split-Path $ConsolizeExe) 'consolize.ico'
+if (-not (Test-Path $iconFile)) { $iconFile = $ConsolizeExe }
 
 # Glyphs come from Segoe MDL2 Assets, which ships with Windows 10 and 11, so
 # the artwork needs no files of its own and cannot arrive half installed.
@@ -330,12 +347,32 @@ foreach ($userDir in $userDirs) {
 # machine that is already set up, killing Steam only to find there was nothing
 # to do would throw the player out of whatever they were in the middle of.
 #
-# "Present" is not enough: an entry whose stored appid is not the one computed
-# now has its artwork filed under a number nothing looks up, so it has to be
-# rewritten rather than left alone.
+# "Present" is not enough, and neither is the appid on its own. Everything this
+# writes can change between versions: where the binary lives, what arguments an
+# entry passes, which icon it points at, which collection it joins. Comparing
+# only the name would freeze the entry as first written and no fix would ever
+# reach a machine that already ran this. So the whole record is compared.
 $wanted = @{}
 foreach ($entry in $entries) {
-    $wanted[$entry.Name] = Get-ShortcutAppId -Exe "`"$($entry.Exe)`"" -AppName $entry.Name
+    $wanted[$entry.Name] = [pscustomobject]@{
+        AppId = Get-ShortcutAppId -Exe "`"$($entry.Exe)`"" -AppName $entry.Name
+        Exe = "`"$($entry.Exe)`""
+        Icon = $iconFile
+        LaunchOptions = $entry.Args
+        Tags = $Collection
+    }
+}
+
+function Test-EntryCurrent {
+    param($Found, $Wanted)
+    if (-not $Found) { return $false }
+    if ($Found.AppId -ne $Wanted.AppId) { return $false }
+    if ($Found.Exe -ne $Wanted.Exe) { return $false }
+    if ($Found.Icon -ne $Wanted.Icon) { return $false }
+    if ($Found.LaunchOptions -ne $Wanted.LaunchOptions) { return $false }
+    if (@($Found.Tags).Count -ne @($Wanted.Tags).Count) { return $false }
+    foreach ($tag in $Wanted.Tags) { if ($Found.Tags -notcontains $tag) { return $false } }
+    return $true
 }
 
 $needsWork = $false
@@ -346,7 +383,7 @@ foreach ($userDir in $userDirs) {
         $parsed = Read-ShortcutsVdf -Bytes ([IO.File]::ReadAllBytes($vdf))
         foreach ($name in $wanted.Keys) {
             $mine = $parsed.Entries | Where-Object { $_.Name -eq $name } | Select-Object -First 1
-            if (-not $mine -or $mine.AppId -ne $wanted[$name]) { $needsWork = $true; break }
+            if (-not (Test-EntryCurrent -Found $mine -Wanted $wanted[$name])) { $needsWork = $true; break }
         }
         if ($needsWork) { break }
     } catch { $needsWork = $true; break }
@@ -417,7 +454,9 @@ foreach ($userDir in $userDirs) {
         # Ask the parsed entries, not the raw bytes. The names can be present in
         # a file where Steam cannot reach them, and a substring match would call
         # that done and skip the machine forever.
-        $current = @($existing.Entries | Where-Object { $wanted.ContainsKey($_.Name) -and $_.AppId -eq $wanted[$_.Name] })
+        $current = @($existing.Entries | Where-Object {
+            $wanted.ContainsKey($_.Name) -and (Test-EntryCurrent -Found $_ -Wanted $wanted[$_.Name])
+        })
         if ($current.Count -eq $entries.Count) {
             Write-Host "  $($userDir.Name): already has the console entries, leaving it alone."
             continue
@@ -465,8 +504,12 @@ foreach ($userDir in $userDirs) {
             Add-VdfString $w 'AppName' $entry.Name
             Add-VdfString $w 'Exe' "`"$($entry.Exe)`""
             Add-VdfString $w 'StartDir' "`"$(Split-Path $entry.Exe)`""
-            # always our icon, even when the target is powershell.exe
-            Add-VdfString $w 'icon' $ConsolizeExe
+            # Always our icon, even when the target is powershell.exe. The .ico
+            # beside the binary is preferred over the binary itself: pointing at
+            # an exe makes Steam extract whatever size the icon resource happens
+            # to carry, and both the library and Big Picture draw it bigger than
+            # that. Falls back to the exe when the file is not there.
+            Add-VdfString $w 'icon' $iconFile
             Add-VdfString $w 'ShortcutPath' ''
             Add-VdfString $w 'LaunchOptions' $entry.Args
             Add-VdfInt $w 'IsHidden' 0

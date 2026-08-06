@@ -163,6 +163,17 @@ if ((Test-Path $legacyScriptDir) -and ($legacyScriptDir -ne $ScriptDir)) {
     Write-Host "Removed the old copies from $legacyScriptDir (that location is user writable)"
 }
 
+# The icon, as a file next to the binary rather than only as a resource inside
+# it. Steam's shortcut entries point at this: extracting an icon out of an exe
+# gives whatever small size the resource happens to carry, and the Steam library
+# and Big Picture both draw it larger than that.
+$iconSource = Join-Path $extracted.FullName 'assets\consolize.ico'
+if (Test-Path $iconSource) {
+    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+    Copy-Item $iconSource (Join-Path $InstallDir 'consolize.ico') -Force
+    Write-Host "Icon installed to $InstallDir\consolize.ico"
+}
+
 # The boot splash: Windows' own logo is switched off, so this is what the
 # machine shows on the way up.
 $splashSource = Join-Path $extracted.FullName 'assets\splash.png'

@@ -189,6 +189,23 @@ Check 'the replacement is tagged' ($desktop[0].Tags -contains 'Consolize') "$($d
 $img = Join-Path $grid ("{0}p.png" -f [BitConverter]::ToUInt32([BitConverter]::GetBytes([int]$desktop[0].appid), 0))
 Check 'artwork matches the new appid' (Test-Path $img) "no $([IO.Path]::GetFileName($img))"
 
+Write-Host "`n9. a change to any field we write reaches a machine already set up"
+# Not just the appid. The icon moved from the exe to an .ico beside it and the
+# entries stayed as first written, because the freshness check only compared the
+# name and the id. Everything written is compared now.
+Copy-Item 'C:\Windows\System32\shell32.dll' (Join-Path $root 'consolize.ico') -Force
+& $script -ConsolizeExe $exe -Force | Out-Null
+$got = Parse-Vdf ([IO.File]::ReadAllBytes($vdf))
+$desktop = @($got | Where-Object { $_.AppName -eq 'Desktop Mode' })
+Check 'the icon now points at the .ico beside the exe' (
+    $desktop[0].icon -eq (Join-Path $root 'consolize.ico')) "still $($desktop[0].icon)"
+Check 'still 4 entries' ($got.Count -eq 4) "got $($got.Count)"
+Remove-Item (Join-Path $root 'consolize.ico') -Force
+& $script -ConsolizeExe $exe -Force | Out-Null
+$got = Parse-Vdf ([IO.File]::ReadAllBytes($vdf))
+$desktop = @($got | Where-Object { $_.AppName -eq 'Desktop Mode' })
+Check 'and falls back to the exe when it is gone' ($desktop[0].icon -eq $exe) "got $($desktop[0].icon)"
+
 Write-Host ''
 if ($fail) { Write-Host "$fail check(s) failed" -ForegroundColor Red; exit 1 }
 Write-Host 'all checks passed' -ForegroundColor Green
