@@ -169,13 +169,44 @@ if ($bootInto -ne 'steam') {
         }
 
         # Heuristics can be wrong; the real acceptance test is whether Big
-        # Picture comes up, so ask the one question that actually settles it.
-        Write-Host ''
-        Write-Host '  Opening Big Picture to confirm the console will start clean...'
-        Start-Process (Join-Path $steam 'steam.exe') -ArgumentList '-bigpicture'
-        Start-Sleep -Seconds 12
-        $confirm = Read-Host '  Did Big Picture open, signed in, with no login screen? [Y/n]'
-        $bigPictureOk = $confirm -notmatch '^[nN]'
+        # Picture comes up. Restart Steam rather than switching modes in the
+        # running client: one that just authenticated is usually still updating
+        # or restarting itself, and -bigpicture on top of that does nothing.
+        $bigPictureOk = $false
+        $answer = 'r'
+        while ($answer -match '^[rR]') {
+            Write-Host ''
+            Write-Host '  Restarting Steam into Big Picture...'
+            Get-Process steam, steamwebhelper -ErrorAction SilentlyContinue |
+                Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 5
+            Start-Process (Join-Path $steam 'steam.exe') -ArgumentList '-bigpicture'
+
+            Write-Host '  Waiting up to 60s for it to come up (a first launch after signing in'
+            Write-Host '  often updates the client first)...'
+            for ($i = 0; $i -lt 12; $i++) {
+                Start-Sleep -Seconds 5
+                Write-Host -NoNewline '.'
+            }
+            Write-Host ''
+
+            Write-Host ''
+            Write-Host '  Did Big Picture open, signed in, with no login screen?'
+            Write-Host '    [Y] yes, it looks right          [R] not yet, try again'
+            Write-Host '    [N] no, stop and leave the shell alone'
+            Write-Host '    [F] no, but replace the shell anyway (this machine has no GPU,'
+            Write-Host '        so Big Picture cannot render here)'
+            $answer = Read-Host '  Choice [Y/r/n/f]'
+
+            if ([string]::IsNullOrWhiteSpace($answer) -or $answer -match '^[yY]') { $bigPictureOk = $true; break }
+            if ($answer -match '^[fF]') {
+                Write-Warning '  Forcing: the shell will be replaced without a working frontend.'
+                Write-Warning '  If the frontend never starts, the watchdog falls back to the desktop.'
+                $bigPictureOk = $true
+                break
+            }
+            if ($answer -match '^[nN]') { break }
+        }
 
         if ($bigPictureOk) {
             Write-Host '  Big Picture confirmed.' -ForegroundColor Green
