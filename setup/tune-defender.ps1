@@ -35,6 +35,10 @@ param(
     # not ask again; Tamper Protection is still handled interactively, because
     # nothing else can.
     [switch]$Confirmed,
+    # Skip the exclusion pass and go straight to the disable. Lets the one step
+    # that needs a human (the Tamper Protection toggle) happen up front, while
+    # the exclusions run later, once the game folders actually exist.
+    [switch]$SkipExclusions,
     [switch]$Restore
 )
 $ErrorActionPreference = 'Stop'
@@ -149,17 +153,19 @@ if ($Restore) {
 
 # ------------------------------------------------------------------- tune ---
 
-Write-Host 'Excluding game paths from scanning...'
-$gamePaths = Get-GamePaths
-if (-not $gamePaths) { Write-Warning 'No game paths detected yet (install Steam first, then re-run).' }
-foreach ($p in $gamePaths) {
-    Add-MpPreference -ExclusionPath $p
-    Write-Host "  $p"
-}
+if (-not $SkipExclusions) {
+    Write-Host 'Excluding game paths from scanning...'
+    $gamePaths = Get-GamePaths
+    if (-not $gamePaths) { Write-Warning 'No game paths detected yet (install Steam first, then re-run).' }
+    foreach ($p in $gamePaths) {
+        Add-MpPreference -ExclusionPath $p
+        Write-Host "  $p"
+    }
 
-Write-Host 'Scan discipline: idle only, 5% CPU cap, no network scan, no scheduled scan...'
-Set-MpPreference -ScanOnlyIfIdleEnabled $true -ScanAvgCPULoadFactor 5 -DisableScanningNetworkFiles $true
-Disable-ScheduledTask -TaskPath '\Microsoft\Windows\Windows Defender\' -TaskName 'Windows Defender Scheduled Scan' -ErrorAction SilentlyContinue | Out-Null
+    Write-Host 'Scan discipline: idle only, 5% CPU cap, no network scan, no scheduled scan...'
+    Set-MpPreference -ScanOnlyIfIdleEnabled $true -ScanAvgCPULoadFactor 5 -DisableScanningNetworkFiles $true
+    Disable-ScheduledTask -TaskPath '\Microsoft\Windows\Windows Defender\' -TaskName 'Windows Defender Scheduled Scan' -ErrorAction SilentlyContinue | Out-Null
+}
 
 if (-not $Disable) {
     Write-Host ''

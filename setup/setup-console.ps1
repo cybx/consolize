@@ -376,6 +376,25 @@ if (-not $otherAdmins) {
     Write-Warning 'No second administrator account exists. That is the way back in if the console misbehaves.'
 }
 
+# --- everything that needs a human, before anything long ---------------------
+# Turning Defender off requires flipping Tamper Protection by hand, because
+# Windows allows no other way. Doing it here, rather than after half an hour of
+# downloads, means the last question is asked in the first minute and you can
+# walk away from the machine for good.
+if ($a.Defender -eq 'disable') {
+    Step 'Defender off (the one step that needs you)'
+    & (Join-Path $here 'tune-defender.ps1') -Disable -Confirmed -SkipExclusions
+}
+
+Write-Host ''
+Write-Host '=====================================================' -ForegroundColor Green
+Write-Host ' Nothing else will ask you anything.' -ForegroundColor Green
+Write-Host '====================================================='
+Write-Host ' From here it installs, configures and reboots on its own. Expect'
+Write-Host ' anywhere from a few minutes to about an hour, mostly Windows updates.'
+Write-Host " Progress is written to $logDir\setup.log as it goes."
+Write-Host ''
+
 Step 'Windows updates, drivers, runtimes and apps'
 $selection = @('gpu', 'runtimes', 'frontends')
 if ($a.Updates -ne 'skip') { $selection = @('updates') + $selection }
@@ -399,9 +418,10 @@ Step 'Silent boot (no logo)'
 # console is actually working, so a failure here never hides the way back in.
 & (Join-Path $here 'boot-silent.ps1')
 
-Step 'Defender'
-if ($a.Defender -eq 'disable') { & (Join-Path $here 'tune-defender.ps1') -Disable -Confirmed }
-else { & (Join-Path $here 'tune-defender.ps1') }
+Step 'Defender exclusions'
+# Always the tune pass here, never the disable: that already happened up front,
+# and exclusions need the game folders, which only exist now.
+& (Join-Path $here 'tune-defender.ps1')
 
 Step 'Performance'
 if ($a.Aggressive) { & (Join-Path $here 'tune-performance.ps1') -Aggressive }
