@@ -208,6 +208,11 @@ Two honest routes:
 - **Keeping it:** an authorised IoT distributor for a single device licence, or
   volume licensing if you already have an agreement.
 
+If you obtain an ISO from any third party, compare its SHA-256 with
+[Microsoft's published hash list](https://cdn-dynmedia-1.microsoft.com/is/content/microsoftcorp/microsoft/final/en-us/microsoft-brand/documents/Windows11IoTEnterpriseLTSC2024EvalHashValues.pdf)
+before booting it. Consolize does not endorse modified images or unauthorised
+activation; the evaluation above is the safe way to test before buying a licence.
+
 And the part that saves most people the trouble: **you do not need LTSC.** The
 default shell method is a per-user registry value that works on Home and Pro
 just as well. What LTSC buys you is a leaner install and no feature updates, not

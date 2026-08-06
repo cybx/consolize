@@ -210,6 +210,11 @@ Dois caminhos honestos:
 - **Para ficar:** um distribuidor IoT autorizado, para uma licença de um
   dispositivo, ou licenciamento por volume se você já tiver contrato.
 
+Se você obtiver uma ISO de qualquer terceiro, compare o SHA-256 com a
+[lista de hashes publicada pela Microsoft](https://cdn-dynmedia-1.microsoft.com/is/content/microsoftcorp/microsoft/final/en-us/microsoft-brand/documents/Windows11IoTEnterpriseLTSC2024EvalHashValues.pdf)
+antes de inicializá-la. O consolize não recomenda imagens modificadas nem ativação
+sem licença; a avaliação acima é o caminho seguro para testar antes de comprar.
+
 E a parte que poupa o trabalho da maioria: **você não precisa do LTSC.** O método
 padrão de troca de shell é um valor de registro por usuário e funciona igual no
 Home e no Pro. O que o LTSC te dá é uma instalação mais enxuta e ausência de
