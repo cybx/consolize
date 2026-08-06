@@ -276,6 +276,14 @@ if ($Unattended) {
     Write-Host '  into a Yes/No a controller can click.'
     $adminAccount = Ask-Yes "Make '$UserName' an administrator?" $true
 
+    Write-Host ''
+    Write-Host '  Windows Firewall asks, with an elevated dialog, the first time a game opens'
+    Write-Host '  a listening socket. Quiet keeps the firewall on but stops it asking and'
+    Write-Host '  stops it blocking on your home network; off removes it everywhere.'
+    $firewall = Ask-Choice 'Firewall?' `
+        (@{ quiet = 'stay on, stop asking, allow inbound on the home network'
+            off   = 'off on every profile, closest to how a console behaves' }) 'quiet'
+
     $a = [pscustomobject]@{
         UserName    = $UserName
         Launchers   = $launchers
@@ -289,6 +297,7 @@ if ($Unattended) {
         RestMode    = $restMode
         Autologon   = $autologon
         AdminAccount = $adminAccount
+        Firewall    = $firewall
         ShellMethod = $ShellMethod
     }
 
@@ -448,6 +457,10 @@ if ($a.AdminAccount) {
     Step 'Elevation the console account can answer'
     & (Join-Path $here 'console-elevation.ps1') -UserName $UserName
 }
+
+Step 'Firewall'
+if ($a.Firewall -eq 'off') { & (Join-Path $here 'firewall-console.ps1') -Off }
+else { & (Join-Path $here 'firewall-console.ps1') }
 
 Step 'Emptying Windows startup'
 # -MachineOnly on purpose: HKCU here is the ADMINISTRATOR's, and silently

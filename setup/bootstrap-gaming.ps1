@@ -152,6 +152,7 @@ $catalog = [ordered]@{
     gpu       = @{ Label = "GPU driver app (detected: $gpuLabel)";                 Recommended = [bool]$gpuVendor }
     runtimes  = @{ Label = 'Game runtimes (VC++ 2005-2022, DirectX, .NET, XNA, OpenAL)'; Recommended = $true }
     frontends = @{ Label = 'Game launchers: Steam / Playnite / Hydra';             Recommended = $true }
+    java      = @{ Label = 'Java (only for third-party Minecraft launchers and servers)'; Recommended = $false }
     media     = @{ Label = 'VLC and mpv (play anything on the TV, no codec pack)'; Recommended = $true }
     tools     = @{ Label = 'Git and 7-Zip';                                        Recommended = $true }
     torrent   = @{ Label = 'qBittorrent plus a torrent folder layout';             Recommended = $false }
@@ -194,7 +195,7 @@ if (-not $selected -or $selected.Count -eq 0) { Write-Host 'Nothing selected, by
 #
 # defender last: its exclusions cover the game folders, which do not exist until
 # the installs above have run.
-$order = @('frontends', 'updates', 'gpu', 'runtimes', 'media', 'tools', 'torrent', 'defender')
+$order = @('frontends', 'updates', 'gpu', 'runtimes', 'java', 'media', 'tools', 'torrent', 'defender')
 $selected = $order | Where-Object { $selected -contains $_ }
 
 Write-Host ''
@@ -251,6 +252,14 @@ foreach ($key in $selected) {
         'tools' {
             Install-FirstAvailable @('Git.Git') 'Git'
             Install-FirstAvailable @('7zip.7zip') '7-Zip'
+        }
+
+        'java' {
+            # Off by default because the official Minecraft launcher has bundled
+            # its own runtime since 2021 and picks the version each release
+            # needs. System Java is for servers, third-party launchers (Prism,
+            # MultiMC) and some mod loaders.
+            Install-FirstAvailable @('Microsoft.OpenJDK.21', 'EclipseAdoptium.Temurin.21.JDK') 'Java (OpenJDK 21)'
         }
 
         'media' {
