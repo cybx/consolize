@@ -55,6 +55,7 @@ através dos reinícios necessários.
 | **Desktop sob demanda** | Entra pela biblioteca da Steam; volta pelo ícone da bandeja ou pelo atalho na área de trabalho; reiniciar sempre volta para o modo console |
 | **Quick Settings no controle** | Saída e volume de áudio, pareamento Bluetooth, wake pelo controle, wifi e controles de energia |
 | **Windows em modo console** | Notificações silenciadas, updates controlados, boot silencioso, runtimes de jogo, ajuste de energia e limpeza opcional da inicialização |
+| **Integração com o SteaMidra** | Instala opcionalmente a versão mais recente para Windows e adiciona ela à Steam automaticamente |
 | **Caminho de volta seguro** | Um administrador separado mantém o desktop normal; scripts de resgate e desinstalação devolvem o Windows |
 
 ## O que o instalador pergunta
@@ -470,6 +471,25 @@ biblioteca como todo o resto.
 Entre com **Configurações > Vincular com código de TV**, em vez de digitar senha
 numa televisão.
 
+### SteaMidra
+
+A entrevista de software oferece o [SteaMidra](https://github.com/Midrags/SFF)
+como integração opcional. O consolize encontra o release mais recente no GitHub,
+confere o SHA-256 publicado pela plataforma, baixa o ZIP para Windows, extrai com
+o 7-Zip em `C:\Program Files\SteaMidra` e adiciona o **SteaMidra** à Steam como
+app não-Steam.
+
+Como o SteaMidra precisa de direitos de administrador, essa entrada passa pelo
+broker de elevação do Windows. No modo de elevação `quiet`, que é o padrão, ele
+abre como administrador sem prompt; no modo `prompt`, aparece o Sim/Não fora da
+área de trabalho segura, para o mouse emulado pelo controle conseguir responder.
+A Steam mantém a entrada marcada como aberta até o SteaMidra fechar. Para instalar
+ou atualizar separadamente:
+
+```powershell
+.\install-steamidra.ps1
+```
+
 ### Também é um media center
 
 O `bootstrap-gaming.ps1` oferece, ou sozinho:
@@ -615,6 +635,10 @@ sala:
   [jazir555](https://github.com/jazir555), foi pioneiro na ideia de ligar o
   Windows direto no Steam Big Picture ou no Playnite como experiência de console.
   O consolize é uma implementação do zero e não reaproveita código do GamesDows.
+- O [SteaMidra](https://github.com/Midrags/SFF), feito por Midrag e seu irmão,
+  está disponível como integração opcional de terceiros. O consolize baixa o
+  release oficial e cria a entrada na biblioteca da Steam; o SteaMidra continua
+  sendo um projeto GPL-3.0 separado, com documentação e termos próprios.
 - O [VacuumTube](https://github.com/shy1132/VacuumTube), de
   [shy1132](https://github.com/shy1132), fornece a experiência opcional de YouTube
   de TV com suporte a controle, instalada pelo `install-youtube.ps1`.
@@ -624,7 +648,7 @@ sala:
 
 Steam e SteamOS são marcas da Valve Corporation. Windows é marca da Microsoft
 Corporation. O consolize é um projeto independente e não tem vínculo nem aval da
-Valve, da Microsoft, do GamesDows ou do VacuumTube.
+Valve, da Microsoft, do GamesDows, do SteaMidra ou do VacuumTube.
 
 ## Licença
 
