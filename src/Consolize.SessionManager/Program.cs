@@ -23,6 +23,11 @@ internal sealed record AppConfig
 
     public string? CustomArgs { get; init; }
 
+    /// <summary>Replaces the built-in arguments for steam/playnite/hydra. Useful
+    /// when the frontend needs coaxing on a given machine, for example
+    /// "-cef-disable-gpu -bigpicture" where Big Picture cannot use a GPU.</summary>
+    public string? FrontendArgs { get; init; }
+
     /// <summary>Console behavior: closing the frontend brings it right back.
     /// The desktop is reached explicitly via `consolize send desktop`.</summary>
     public bool RelaunchOnCleanExit { get; init; } = true;
@@ -427,6 +432,17 @@ internal static class Program
     }
 
     private static (string Exe, string Args)? ResolveFrontend()
+    {
+        var resolved = ResolveFrontendCore();
+        if (resolved is null) return null;
+
+        // An explicit override wins over the built-in arguments.
+        return string.IsNullOrWhiteSpace(_config.FrontendArgs)
+            ? resolved
+            : (resolved.Value.Exe, _config.FrontendArgs!);
+    }
+
+    private static (string Exe, string Args)? ResolveFrontendCore()
     {
         switch (_config.Frontend.ToLowerInvariant())
         {

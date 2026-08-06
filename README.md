@@ -141,6 +141,15 @@ Config lives at `%LOCALAPPDATA%\Consolize\config.json` (created on first run,
 with `%ProgramData%\Consolize\config.json` as the machine-wide fallback), logs at
 `%LOCALAPPDATA%\Consolize\logs\`.
 
+**Coaxing a stubborn frontend:** `FrontendArgs` replaces the built-in arguments.
+Big Picture is Chromium and wants a GPU, so on a machine without 3D acceleration
+(a plain Hyper-V VM, for instance) it hangs or renders black until you turn that
+off:
+
+```json
+{ "Frontend": "steam", "FrontendArgs": "-cef-disable-gpu -bigpicture" }
+```
+
 **Your own boot logo:** drop a `splash.png` next to either config and the
 session manager shows it fullscreen while the frontend starts, closing the
 moment the frontend draws its first window. Since `boot-silent.ps1` removes the
