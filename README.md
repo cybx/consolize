@@ -14,6 +14,10 @@
 </p>
 
 <p align="center">
+  <strong>English</strong> · <a href="README.pt-BR.md">Português</a>
+</p>
+
+<p align="center">
   <a href="#install">Install</a> ·
   <a href="#what-the-installer-asks-you">Options</a> ·
   <a href="#what-it-changes-on-your-machine">What it changes</a> ·
@@ -136,7 +140,7 @@ alone is one of the answers to every one of these questions.
 ## Before you install
 
 This project replaces the Windows shell **for one dedicated account** and makes
-machine-wide system changes. Use it on a gaming PC, handheld or test VM—not on
+machine-wide system changes. Use it on a gaming PC, handheld or test VM, not on
 the only account of a work machine. Keep a second administrator account as the
 recovery path.
 
@@ -187,6 +191,27 @@ SteamOS ships a console experience out of the box.
 Any edition works. LTSC is what this is developed and tested against, because it
 ships lean (no Widgets, Copilot, Teams or Store apps) and only receives quality
 updates, so no feature update will ever break your living room.
+
+### Getting hold of it
+
+Worth saying plainly, because it is the first wall people hit: **IoT Enterprise
+LTSC is not sold at retail.** There is no boxed copy and no store page. It is
+licensed per device through Microsoft's authorised IoT distributors (Arrow,
+Avnet, Advantech and similar) or through volume licensing.
+
+Two honest routes:
+
+- **Trying it:** Microsoft publishes a free
+  [90-day evaluation](https://www.microsoft.com/en-us/evalcenter/evaluate-windows-11-iot-enterprise-ltsc)
+  of Windows 11 IoT Enterprise LTSC. That is enough to build the machine, run
+  consolize and decide whether the whole idea is for you.
+- **Keeping it:** an authorised IoT distributor for a single device licence, or
+  volume licensing if you already have an agreement.
+
+And the part that saves most people the trouble: **you do not need LTSC.** The
+default shell method is a per-user registry value that works on Home and Pro
+just as well. What LTSC buys you is a leaner install and no feature updates, not
+a working console. If you already have Windows 11 on the machine, use it.
 
 ### How the shell is replaced
 
