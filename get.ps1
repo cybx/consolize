@@ -46,6 +46,29 @@ Write-Host '  consolize installer' -ForegroundColor Cyan
 Write-Host '  turns this PC into a couch gaming console'
 Write-Host ''
 
+# The Windows console enables QuickEdit by default, and a click inside the
+# window then PAUSES whatever is running until Esc or Enter. Setup is long
+# enough that someone will click it, and a paused console is indistinguishable
+# from a crashed one. Console settings are read when a window is created, so
+# doing this here means the elevated window created just below is already
+# immune. (Same user either way: elevation does not change the hive.)
+function Disable-ConsoleQuickEdit {
+    try {
+        $key = 'HKCU:\Console'
+        if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
+        New-ItemProperty -Path $key -Name 'QuickEdit' -Value 0 -PropertyType DWord -Force | Out-Null
+
+        # powershell.exe keeps its own console profile, which would win
+        $psKey = Join-Path $key '%SystemRoot%_System32_WindowsPowerShell_v1.0_powershell.exe'
+        if (Test-Path $psKey) {
+            New-ItemProperty -Path $psKey -Name 'QuickEdit' -Value 0 -PropertyType DWord -Force | Out-Null
+        }
+    } catch {
+        # cosmetic; never worth failing an install over
+    }
+}
+Disable-ConsoleQuickEdit
+
 # Everything past this point writes to Program Files, services, the registry and
 # the shell, so elevate rather than failing halfway. Piped through iex there is
 # no script file to re-launch, so the elevated session re-fetches this same
@@ -69,7 +92,8 @@ if (-not (Test-Admin) -and -not $DownloadOnly -and -not $NoElevate) {
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
 
     Write-Host 'Administrator rights are needed (Program Files, services, registry, shell).'
-    Write-Host 'Approve the prompt: the installer continues in a new elevated window.'
+    Write-Host 'Approve the prompt: the installer continues in a new elevated window,'
+    Write-Host 'where clicking will not pause it.'
     try {
         Start-Process powershell -Verb RunAs -ArgumentList `
             '-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded
