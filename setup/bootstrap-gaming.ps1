@@ -32,6 +32,7 @@ Items:
              without touching system codecs, which is also why codec packs
              (K-Lite and friends) are not worth their side effects here.
   tools      Git and 7-Zip
+  steamidra  Latest SteaMidra portable build, also added to Steam
   torrent    qBittorrent plus a torrent folder layout
   defender   Defender: tune it or disable it entirely, asked at run time
 
@@ -156,6 +157,7 @@ $catalog = [ordered]@{
     media     = @{ Label = 'VLC and mpv (play anything on the TV, no codec pack)'; Recommended = $true }
     youtube   = @{ Label = 'YouTube on the TV, gamepad driven (VacuumTube)';       Recommended = $true }
     tools     = @{ Label = 'Git and 7-Zip';                                        Recommended = $true }
+    steamidra = @{ Label = 'SteaMidra (latest release, added as a non-Steam app)'; Recommended = $true }
     torrent   = @{ Label = 'qBittorrent plus a torrent folder layout';             Recommended = $false }
     defender  = @{ Label = 'Defender: tune (default) or disable entirely';         Recommended = $true }
 }
@@ -196,7 +198,7 @@ if (-not $selected -or $selected.Count -eq 0) { Write-Host 'Nothing selected, by
 #
 # defender last: its exclusions cover the game folders, which do not exist until
 # the installs above have run.
-$order = @('frontends', 'updates', 'gpu', 'runtimes', 'java', 'media', 'youtube', 'tools', 'torrent', 'defender')
+$order = @('frontends', 'updates', 'gpu', 'runtimes', 'java', 'media', 'youtube', 'tools', 'steamidra', 'torrent', 'defender')
 $selected = $order | Where-Object { $selected -contains $_ }
 
 Write-Host ''
@@ -253,6 +255,15 @@ foreach ($key in $selected) {
         'tools' {
             Install-FirstAvailable @('Git.Git') 'Git'
             Install-FirstAvailable @('7zip.7zip') '7-Zip'
+        }
+
+        'steamidra' {
+            $installer = Join-Path $PSScriptRoot 'install-steamidra.ps1'
+            if (Test-Path $installer) {
+                try { & $installer } catch { Write-Warning "SteaMidra: $($_.Exception.Message)" }
+            } else {
+                Write-Warning 'install-steamidra.ps1 is not here, skipping.'
+            }
         }
 
         'java' {

@@ -14,6 +14,7 @@ the entries are rewritten.
   .\add-app-shortcut.ps1 -Name 'RetroArch' -Exe 'C:\RetroArch\retroarch.exe'
   .\add-app-shortcut.ps1 -Name 'Moonlight' -Exe 'C:\Program Files\Moonlight\Moonlight.exe' -Arguments '--fullscreen'
   .\add-app-shortcut.ps1 -Name 'Kodi' -Exe '...' -Glyph E8B2   # a Segoe MDL2 code point
+  .\add-app-shortcut.ps1 -Name 'My App' -Exe '...' -Artwork 'C:\art\logo.png'
   .\add-app-shortcut.ps1 -List
   .\add-app-shortcut.ps1 -Name 'RetroArch' -Delete
 #>
@@ -25,6 +26,9 @@ param(
     # default is a generic application icon. Browse them at
     # https://learn.microsoft.com/windows/apps/design/style/segoe-ui-symbol-font
     [string]$Glyph,
+    # An official logo or key art used instead of the generated glyph. The
+    # Steam portrait, landscape, hero and logo images are derived from it.
+    [string]$Artwork,
     [switch]$Delete,
     [switch]$List,
     [switch]$NoApply
@@ -86,9 +90,14 @@ if (-not $Exe) { throw 'Give it an -Exe (the program to launch).' }
 $Exe = [IO.Path]::GetFullPath($Exe)
 if (-not (Test-Path $Exe)) { throw "$Exe is not there. Install it first, then run this." }
 if ($Glyph -and $Glyph -notmatch '^[0-9a-fA-F]{4}$') { throw "-Glyph is four hex digits, for example E8B2." }
+if ($Artwork) {
+    $Artwork = [IO.Path]::GetFullPath($Artwork)
+    if (-not (Test-Path $Artwork -PathType Leaf)) { throw "$Artwork is not there." }
+}
 
 $entry = [ordered]@{ name = $Name; exe = $Exe; args = $Arguments }
 if ($Glyph) { $entry.glyph = $Glyph.ToUpper() }
+if ($Artwork) { $entry.artwork = $Artwork }
 
 $updated = @($extras | Where-Object { $_.name -ne $Name })
 $replaced = $updated.Count -ne $extras.Count

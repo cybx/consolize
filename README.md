@@ -262,6 +262,17 @@ else.
 Sign in with **Settings > Link with TV code** rather than typing a password on a
 television.
 
+### SteaMidra
+
+The software interview offers SteaMidra by default. Consolize resolves the
+latest GitHub release at install time, downloads its Windows ZIP, extracts it
+with 7-Zip to `C:\Program Files\SteaMidra`, and adds **SteaMidra** to Steam as a
+non-Steam app. Run or update it on its own with:
+
+```powershell
+.\install-steamidra.ps1
+```
+
 ### Taking it back off
 
 `rescue.ps1` is for a setup that went wrong, and only undoes what can hide the

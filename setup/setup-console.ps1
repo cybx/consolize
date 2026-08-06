@@ -280,6 +280,7 @@ if ($Unattended) {
             skip = 'skip for now' }) 'all'
     $wantMedia = Ask-Yes 'Install VLC and mpv (play anything on the TV, no codec pack)?' $true
     $wantTools = Ask-Yes 'Install Git and 7-Zip?' $true
+    $wantSteaMidra = Ask-Yes 'Install the latest SteaMidra and add it to Steam?' $true
     $wantTorrent = Ask-Yes 'Install qBittorrent and create a torrent folder layout?' $false
 
     Write-Host ''
@@ -321,6 +322,7 @@ if ($Unattended) {
         Updates     = $updates
         Media       = $wantMedia
         Tools       = $wantTools
+        SteaMidra   = $wantSteaMidra
         Torrent     = $wantTorrent
         Defender    = $defender
         Aggressive  = $aggressive
@@ -456,6 +458,11 @@ $selection = @('gpu', 'runtimes', 'frontends')
 if ($a.Updates -ne 'skip') { $selection = @('updates') + $selection }
 if ($a.Media) { $selection += 'media' }
 if ($a.Tools) { $selection += 'tools' }
+if ($a.SteaMidra) {
+    # Its portable release is a ZIP extracted by 7-Zip.
+    if ($selection -notcontains 'tools') { $selection += 'tools' }
+    $selection += 'steamidra'
+}
 if ($a.Torrent) { $selection += 'torrent' }
 
 & (Join-Path $here 'bootstrap-gaming.ps1') `

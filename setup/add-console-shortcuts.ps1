@@ -291,6 +291,9 @@ if (Test-Path $extrasFile) {
                 Glyph = if ($extra.glyph) { [char][Convert]::ToInt32($extra.glyph, 16) } else { [char]0xECAA }
                 Accent = $rgb
                 OwnIcon = $true
+                Artwork = if ($extra.artwork -and (Test-Path $extra.artwork -PathType Leaf)) {
+                    [string]$extra.artwork
+                } else { $null }
             }
         }
         if ($extras.Count) { Write-Host "Extra shortcuts from $($extrasFile): $(($extras | ForEach-Object { $_.name }) -join ', ')" }
@@ -309,7 +312,8 @@ if (Test-Path $extrasFile) {
 #   <appid>_hero.png  1920x620  the banner across the top of the game's page
 #   <appid>_logo.png            drawn over the hero, so it has to be transparent
 function Write-ShortcutArtwork {
-    param([string]$GridDir, [int]$AppId, [string]$Name, [char]$Glyph, [int[]]$Accent)
+    param([string]$GridDir, [int]$AppId, [string]$Name, [char]$Glyph, [int[]]$Accent,
+          [string]$Artwork)
 
     Add-Type -AssemblyName System.Drawing -ErrorAction Stop
     $unsigned = [BitConverter]::ToUInt32([BitConverter]::GetBytes($AppId), 0)
@@ -343,7 +347,23 @@ function Write-ShortcutArtwork {
             $centre = New-Object System.Drawing.StringFormat
             $centre.Alignment = 'Center'; $centre.LineAlignment = 'Center'
 
-            if (-not $Transparent) {
+            if ($Artwork) {
+                $source = [System.Drawing.Image]::FromFile($Artwork)
+                try {
+                    # Preserve the official art's aspect ratio. Capsules keep
+                    # room for the app name; the transparent Steam logo slot is
+                    # the source image on its own.
+                    $boxW = if ($Transparent) { $W * 0.90 } else { $W * 0.78 }
+                    $boxH = if ($Transparent) { $H * 0.90 } else { $H * 0.48 }
+                    $scale = [Math]::Min($boxW / $source.Width, $boxH / $source.Height)
+                    $drawW = [single]($source.Width * $scale)
+                    $drawH = [single]($source.Height * $scale)
+                    $drawX = [single](($W - $drawW) / 2)
+                    $drawY = if ($Transparent) { [single](($H - $drawH) / 2) }
+                             else { [single]($H * 0.08 + ($boxH - $drawH) / 2) }
+                    $g.DrawImage($source, $drawX, $drawY, $drawW, $drawH)
+                } finally { $source.Dispose() }
+            } elseif (-not $Transparent) {
                 $glyphFont = New-Object System.Drawing.Font('Segoe MDL2 Assets', [single]($H * $GlyphScale), 'Regular', 'Pixel')
                 $glyphBrush = New-Object System.Drawing.SolidBrush($accentColor)
                 $g.DrawString([string]$Glyph, $glyphFont, $glyphBrush,
@@ -354,6 +374,12 @@ function Write-ShortcutArtwork {
             # The logo is drawn over the hero rather than beside it, so with no
             # background to sit on its text moves up to fill the space the glyph
             # would have taken.
+            if ($Artwork -and $Transparent) {
+                $centre.Dispose()
+                $bmp.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+                return
+            }
+
             $nameTop = if ($Transparent) { 0.20 } else { 0.58 }
             $markTop = if ($Transparent) { 0.58 } else { 0.82 }
 
@@ -461,7 +487,7 @@ foreach ($userDir in $userDirs) {
         $appId = Get-ShortcutAppId -Exe "`"$($entry.Exe)`"" -AppName $entry.Name
         try {
             Write-ShortcutArtwork -GridDir $gridDir -AppId $appId -Name $entry.Name `
-                -Glyph $entry.Glyph -Accent $entry.Accent
+                -Glyph $entry.Glyph -Accent $entry.Accent -Artwork $entry.Artwork
             $written.Add([BitConverter]::ToUInt32([BitConverter]::GetBytes($appId), 0))
         } catch {
             Write-Warning "  could not draw the artwork for '$($entry.Name)': $($_.Exception.Message)"

@@ -259,9 +259,10 @@ $hadExtras = Test-Path $extrasFile
 if ($hadExtras) { Move-Item $extrasFile $extrasBackup -Force }
 try {
     $someApp = Join-Path $root 'SomeApp.exe'
+    $someArtwork = Join-Path (Split-Path -Parent $PSScriptRoot) 'assets\splash.png'
     Set-Content $someApp 'stub'
     New-Item -ItemType Directory -Force -Path $extrasDir | Out-Null
-    , @([pscustomobject]@{ name = 'RetroArch'; exe = $someApp; args = '--fullscreen' }) |
+    , @([pscustomobject]@{ name = 'RetroArch'; exe = $someApp; args = '--fullscreen'; artwork = $someArtwork }) |
         ConvertTo-Json -Depth 4 | Set-Content $extrasFile
 
     & $script -ConsolizeExe $exe -Force -Remove *> $null
