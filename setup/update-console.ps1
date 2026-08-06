@@ -84,6 +84,21 @@ if (Get-Command winget -ErrorAction SilentlyContinue) {
     Write-Host '  winget not available, skipping'
 }
 
+# --- the library entries ------------------------------------------------------
+# Reapplied on every update, not only at setup. Otherwise a machine whose
+# shortcuts were written by an older version has no way back: the entry that
+# launches this very script is one of the ones missing from the library, so the
+# fix can never arrive through the route that needs fixing. The script decides
+# for itself whether there is anything to do, and only closes Steam if there is.
+Write-Host ''
+Write-Host '==> Console entries in the Steam library...' -ForegroundColor Cyan
+$shortcuts = Join-Path $PSScriptRoot 'add-console-shortcuts.ps1'
+if (Test-Path $shortcuts) {
+    try { & $shortcuts -Force } catch { Write-Warning "Could not update the library entries: $($_.Exception.Message)" }
+} else {
+    Write-Warning "  $shortcuts not found, skipping"
+}
+
 Write-Host ''
 Write-Host 'Done.' -ForegroundColor Green
 

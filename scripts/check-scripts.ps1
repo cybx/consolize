@@ -11,6 +11,11 @@ that only surface at run time and therefore reach the user first.
      parses as extra positional arguments.
   4. Calls to sibling scripts passing parameters those scripts do not declare.
   5. Functions used before they are defined at script scope.
+  6. Eight digit hex literals with the top bit set and no L suffix. PowerShell
+     reads those as a 32 bit pattern, so 0xFFFFFFFF is Int32 -1 and 0x80000000
+     is Int32 -2147483648. Arithmetic then goes negative and silently produces
+     a wrong number rather than an error. This broke the CRC that generates
+     Steam's shortcut ids.
 
 Run it before committing:  pwsh -File scripts/check-scripts.ps1
 #>
@@ -40,6 +45,18 @@ foreach ($file in $scripts) {
     if ($errors.Count -gt 0) {
         foreach ($e in $errors) { Report $file.FullName $e.Extent.StartLineNumber 'parse' $e.Message }
         continue
+    }
+
+    # --- 6. hex literals that turn negative ---------------------------------
+    foreach ($token in $tokens) {
+        if ($token.Kind -ne [System.Management.Automation.Language.TokenKind]::Number) { continue }
+        if ($token.Text -match '^0[xX][89a-fA-F][0-9a-fA-F]{7}$') {
+            $signed = [int]$token.Value
+            $unsigned = [BitConverter]::ToUInt32([BitConverter]::GetBytes($signed), 0)
+            Report $file.FullName $token.Extent.StartLineNumber 'hexliteral' (
+                "$($token.Text) is Int32 $signed, not $unsigned. " +
+                "Write $($token.Text)L to get the unsigned value.")
+        }
     }
 
     # --- 2. parameter / local variable collisions ---------------------------
