@@ -31,6 +31,10 @@ the sofa. The native players do not need that.
 param(
     [ValidateSet('kodi', 'jellyfin', 'plex', 'stremio')] [string[]]$Apps,
     [ValidateSet('netflix', 'primevideo', 'disney', 'max', 'globoplay', 'crunchyroll')] [string[]]$Services,
+    # How much to enlarge the streaming sites. A web page is laid out to be read
+    # from half a metre away; a television is watched from three. 1.0 leaves
+    # them at desktop size.
+    [ValidateRange(1.0, 3.0)] [double]$Scale = 1.5,
     [switch]$NonInteractive,
     [switch]$NoShortcut
 )
@@ -146,8 +150,29 @@ if ($Services) {
             # point on a television: no tabs, no address bar, no back button
             # sitting over the film. A separate profile directory per service
             # keeps each one signed in on its own.
+            #
+            # The rest are the traps, and every one of them is something that
+            # would only show up with a controller in hand and no keyboard:
+            #
+            #   --no-first-run            a fresh profile otherwise opens Edge's
+            #                             welcome and import flow on first
+            #                             launch, full screen, mouse only. That
+            #                             is a dead end on a television.
+            #   --no-default-browser-check  same, one dialog later
+            #   --disable-session-crashed-bubble  after a power cut, "restore
+            #                             pages?" sits over the film waiting for
+            #                             a click nobody can make
+            #   --noerrdialogs            no modal error boxes on a TV
+            #   --force-device-scale-factor  a web page laid out for a desk is
+            #                             small from three metres. Netflix's own
+            #                             TV interface is far larger than its
+            #                             web one; this closes some of the gap.
             $profileDir = Join-Path $env:LOCALAPPDATA "Consolize\web\$key"
-            $arguments = "--app=`"$($site.Url)`" --start-fullscreen --user-data-dir=`"$profileDir`""
+            $arguments = "--app=`"$($site.Url)`" --start-fullscreen" +
+                         " --user-data-dir=`"$profileDir`"" +
+                         " --no-first-run --no-default-browser-check" +
+                         " --disable-session-crashed-bubble --noerrdialogs" +
+                         " --force-device-scale-factor=$Scale"
             if ($canShortcut) { & $shortcut -Name $site.Label -Exe $edge -Arguments $arguments -Glyph 'E714' -NoApply }
             else { Write-Host "  $edge $arguments" }
         }
@@ -164,10 +189,22 @@ if ($canShortcut) {
 
 if ($Services) {
     Write-Host ''
-    Write-Host 'About the services, so it is not a surprise on the sofa:' -ForegroundColor Cyan
-    Write-Host '  They are web apps, and a web app does not read a gamepad. In Steam, set'
-    Write-Host '  Settings > Controller > Desktop layout to one with right-stick mouse, and'
-    Write-Host '  bind a chord to the on-screen keyboard for signing in.'
-    Write-Host '  Edge is used on purpose: Netflix only serves 1080p and 4K to browsers that'
-    Write-Host '  can use PlayReady. Firefox would cap the television at 720p.'
+    Write-Host 'The streaming services need a controller layout, once.' -ForegroundColor Cyan
+    Write-Host 'They are web pages, and a web page does not read a gamepad. That binding lives'
+    Write-Host 'in your Steam cloud config, so it cannot be set from here.'
+    Write-Host ''
+    Write-Host '  Steam > Settings > Controller > Desktop layout, then:'
+    Write-Host '    right stick   mouse            move the pointer'
+    Write-Host '    right trigger left click       select'
+    Write-Host '    d-pad         arrow keys       Netflix moves between rows with these'
+    Write-Host '    A             Enter            play'
+    Write-Host '    B             Escape           leave fullscreen, go back'
+    Write-Host '    Y             F                fullscreen'
+    Write-Host '    a chord       on-screen keyboard   for signing in'
+    Write-Host ''
+    Write-Host 'Two choices behind this, so they do not look arbitrary:' -ForegroundColor Cyan
+    Write-Host '  Edge, because Netflix serves 1080p and 4K only to browsers that can use'
+    Write-Host '  PlayReady. Firefox would cap the television at 720p.'
+    Write-Host "  Enlarged to $Scale times, because these pages are laid out to be read from"
+    Write-Host '  half a metre and a television is watched from three. Pass -Scale to change it.'
 }
