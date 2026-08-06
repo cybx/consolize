@@ -26,24 +26,18 @@ under the punctuation keys.
 #>
 param(
     [Parameter(Mandatory)] [string]$Language,
+    # The physical keyboard is not implied by the language: a Brazilian machine
+    # may have an ABNT2, an ABNT1 or a US board, and picking one from the
+    # language alone puts the wrong characters under the punctuation keys.
+    # Left empty, the current layout is kept untouched.
+    # List what is installed with: Get-WinUserLanguageList
+    [string]$KeyboardLayout,
     [string]$TimeZone,
     # The display language is a real download. Skip it to change only the
-    # keyboard, formats and time zone.
+    # formats, keyboard and time zone.
     [switch]$SkipLanguagePack
 )
 $ErrorActionPreference = 'Stop'
-
-# Keyboard layouts for the languages worth spelling out; anything else falls
-# back to whatever Windows pairs with the language by default.
-$layouts = @{
-    'pt-BR' = '0416:00000416'   # ABNT2
-    'pt-PT' = '0816:00000816'
-    'en-US' = '0409:00000409'
-    'es-ES' = '0C0A:0000040A'
-    'fr-FR' = '040C:0000040C'
-    'de-DE' = '0407:00000407'
-    'it-IT' = '0410:00000410'
-}
 
 Write-Host "Language: $Language"
 
@@ -74,13 +68,22 @@ if (-not $SkipLanguagePack) {
 
 # --- keyboard, formats, region ----------------------------------------------
 
-$layout = $layouts[$Language]
+$current = (Get-WinUserLanguageList | Select-Object -First 1).InputMethodTips
 $list = New-WinUserLanguageList -Language $Language
-if ($layout) {
+
+if ($KeyboardLayout) {
     $list[0].InputMethodTips.Clear()
-    $list[0].InputMethodTips.Add($layout)
-    Write-Host "  keyboard layout: $layout"
+    $list[0].InputMethodTips.Add($KeyboardLayout)
+    Write-Host "  keyboard layout: $KeyboardLayout (as asked)"
+} elseif ($current) {
+    # Keep what is already there rather than guessing from the language.
+    $list[0].InputMethodTips.Clear()
+    foreach ($tip in $current) { $list[0].InputMethodTips.Add($tip) }
+    Write-Host "  keyboard layout: kept as it was ($($current -join ', '))"
+} else {
+    Write-Host "  keyboard layout: Windows default for $Language ($($list[0].InputMethodTips -join ', '))"
 }
+
 Set-WinUserLanguageList $list -Force
 Write-Host '  user language list set'
 

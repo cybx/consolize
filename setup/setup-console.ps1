@@ -242,6 +242,16 @@ if ($Unattended) {
     $language = Read-Host "  language tag to use, e.g. pt-BR (Enter to keep $currentLang)"
     if ([string]::IsNullOrWhiteSpace($language)) { $language = $null }
 
+    $keyboard = $null
+    if ($language) {
+        Write-Host '  Keyboard layout, which is not implied by the language: a Brazilian'
+        Write-Host '  machine may have an ABNT2, an ABNT1 or a US board.'
+        Write-Host '    0416:00000416  Portuguese (Brazil ABNT2)     0416:00010416  ABNT1'
+        Write-Host '    0409:00000409  US                            0409:00020409  US International'
+        $keyboard = Read-Host '  layout id (Enter to keep the current one)'
+        if ([string]::IsNullOrWhiteSpace($keyboard)) { $keyboard = $null }
+    }
+
     Write-Host ''
     Write-Host 'LAUNCHERS' -ForegroundColor Yellow
     $launchers = @()
@@ -308,6 +318,7 @@ if ($Unattended) {
         Autologon   = $autologon
         AdminAccount = $adminAccount
         Language    = $language
+        Keyboard    = $keyboard
         Firewall    = $firewall
         ShellMethod = $ShellMethod
     }
@@ -473,7 +484,9 @@ if ($a.Language) {
     # Early: it downloads a language pack, and every account created afterwards
     # inherits the result, which is the point.
     Step "Language and keyboard ($($a.Language))"
-    & (Join-Path $here 'locale-console.ps1') -Language $a.Language
+    $localeArgs = @{ Language = $a.Language }
+    if ($a.Keyboard) { $localeArgs['KeyboardLayout'] = $a.Keyboard }
+    & (Join-Path $here 'locale-console.ps1') @localeArgs
 }
 
 Step 'Firewall'

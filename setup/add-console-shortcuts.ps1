@@ -151,9 +151,14 @@ foreach ($userDir in $userDirs) {
         Write-Host "  $($userDir.Name): $firstIndex shortcut(s) already there, adding to them (backup: $(Split-Path $backup -Leaf))"
     }
 
+    $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $updateScript = Join-Path $PSScriptRoot 'update-console.ps1'
+
     $entries = @(
-        @{ Name = 'Quick Settings'; Args = 'panel' }
-        @{ Name = 'Desktop Mode';   Args = 'send desktop' }
+        @{ Name = 'Quick Settings'; Exe = $ConsolizeExe; Args = 'panel' }
+        @{ Name = 'Desktop Mode';   Exe = $ConsolizeExe; Args = 'send desktop' }
+        @{ Name = 'Update consolize'; Exe = $powershell
+           Args = "-NoProfile -ExecutionPolicy Bypass -File `"$updateScript`"" }
     )
 
     $stream = [IO.File]::Open($vdf, 'Create')
@@ -175,8 +180,9 @@ foreach ($userDir in $userDirs) {
             $w.Write([Text.Encoding]::UTF8.GetBytes("$index")); $w.Write([byte]0)
 
             Add-VdfString $w 'AppName' $entry.Name
-            Add-VdfString $w 'Exe' "`"$ConsolizeExe`""
-            Add-VdfString $w 'StartDir' "`"$(Split-Path $ConsolizeExe)`""
+            Add-VdfString $w 'Exe' "`"$($entry.Exe)`""
+            Add-VdfString $w 'StartDir' "`"$(Split-Path $entry.Exe)`""
+            # always our icon, even when the target is powershell.exe
             Add-VdfString $w 'icon' $ConsolizeExe
             Add-VdfString $w 'ShortcutPath' ''
             Add-VdfString $w 'LaunchOptions' $entry.Args

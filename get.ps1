@@ -151,7 +151,23 @@ if (Test-Path $splashSource) {
 
 if ($exeSource) {
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-    Copy-Item $exeSource (Join-Path $InstallDir 'consolize.exe') -Force
+    $target = Join-Path $InstallDir 'consolize.exe'
+
+    # The running shell IS this file, so it cannot be overwritten in place.
+    # Windows does allow renaming a running executable, and the open handle
+    # follows the rename, so the shell keeps working from the old name until the
+    # next sign-in picks up the new one.
+    if (Test-Path $target) {
+        $retired = Join-Path $InstallDir 'consolize.old.exe'
+        Remove-Item $retired -Force -ErrorAction SilentlyContinue
+        try {
+            Rename-Item $target 'consolize.old.exe' -Force -ErrorAction Stop
+        } catch {
+            Write-Warning "Could not move the running consolize.exe aside: $($_.Exception.Message)"
+        }
+    }
+
+    Copy-Item $exeSource $target -Force
     Write-Host "consolize.exe installed to $InstallDir"
 
     # make `consolize` work in any new shell
