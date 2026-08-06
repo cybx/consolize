@@ -47,9 +47,11 @@ function Get-Extras {
 function Save-Extras {
     param($Items)
     New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
-    # An array of one would be written as a bare object by ConvertTo-Json, and
-    # then reading it back gives an object where a list is expected.
-    ,@($Items) | ConvertTo-Json -Depth 4 | Set-Content $extrasFile
+    # -InputObject is deliberate. In Windows PowerShell 5.1, piping ,@($Items)
+    # serializes the wrapper as { "value": [...], "Count": n } rather than as
+    # a JSON array. The reader then sees one object with no name/exe and silently
+    # skips the app. Passing the array as InputObject works in both 5.1 and 7.
+    ConvertTo-Json -InputObject @($Items) -Depth 4 | Set-Content $extrasFile
 }
 
 $extras = Get-Extras

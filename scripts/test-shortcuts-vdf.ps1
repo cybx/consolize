@@ -262,8 +262,13 @@ try {
     $someArtwork = Join-Path (Split-Path -Parent $PSScriptRoot) 'assets\splash.png'
     Set-Content $someApp 'stub'
     New-Item -ItemType Directory -Force -Path $extrasDir | Out-Null
-    , @([pscustomobject]@{ name = 'RetroArch'; exe = $someApp; args = '--fullscreen'; artwork = $someArtwork }) |
-        ConvertTo-Json -Depth 4 | Set-Content $extrasFile
+    $addApp = Join-Path (Split-Path -Parent $PSScriptRoot) 'setup\add-app-shortcut.ps1'
+    & $addApp -Name 'RetroArch' -Exe $someApp -Arguments '--fullscreen' `
+        -Artwork $someArtwork -NoApply | Out-Null
+    $savedExtras = @(Get-Content $extrasFile -Raw | ConvertFrom-Json)
+    Check 'a one-item extras file is a JSON array in Windows PowerShell 5.1' `
+        ($savedExtras.Count -eq 1 -and $savedExtras[0].name -eq 'RetroArch') `
+        (Get-Content $extrasFile -Raw)
 
     & $script -ConsolizeExe $exe -Force -Remove *> $null
     & $script -ConsolizeExe $exe -Force | Out-Null
@@ -278,8 +283,8 @@ try {
     Check 'artwork was drawn for it' (Test-Path (Join-Path $grid "${u}p.png")) "no ${u}p.png"
 
     # An entry naming a program that is not installed would launch nothing.
-    , @([pscustomobject]@{ name = 'Ghost'; exe = 'C:\nope\ghost.exe'; args = '' }) |
-        ConvertTo-Json -Depth 4 | Set-Content $extrasFile
+    ConvertTo-Json -InputObject @([pscustomobject]@{ name = 'Ghost'; exe = 'C:\nope\ghost.exe'; args = '' }) `
+        -Depth 4 | Set-Content $extrasFile
     & $script -ConsolizeExe $exe -Force -WarningAction SilentlyContinue | Out-Null
     $got = Parse-Vdf ([IO.File]::ReadAllBytes($vdf))
     Check 'an app that is not installed is skipped' ($got.AppName -notcontains 'Ghost') "$($got.AppName -join ', ')"
