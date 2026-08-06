@@ -6,11 +6,43 @@
 
 Turn a Windows 11 PC into a couch gaming console. The machine boots straight into Steam Big Picture (or Playnite Fullscreen), survives frontend crashes without ever showing a black screen or a desktop, and Explorer only appears when you explicitly ask for it.
 
-Think SteamOS "Game Mode", but on Windows: every anticheat title works, no Proton tax, mature HDR/VRR support.
+Think SteamOS "Game Mode", but on Windows.
 
 ## Why not just use SteamOS or Bazzite?
 
-If your library is 100% Proton-friendly, do use them. This project exists for the rest of us: Valorant/Vanguard, Fortnite, Destiny 2, EA anticheat titles and friends simply do not run on Linux.
+They are excellent, and if everything you play runs under Proton you should
+probably use them: they do all of this natively and need no project like this
+one to behave. Three reasons someone ends up here anyway.
+
+**Anticheat.** The hard blocker, and the one no amount of tuning fixes.
+Valorant, Fortnite, Destiny 2, most EA titles: kernel anticheat does not run on
+Linux, and the games are not "slow" there, they simply refuse to start.
+
+**Performance on current AMD hardware.** The old assumption that Linux matches
+or beats Windows does not hold on RDNA 4 today. Aggregated testing on an RX 9070
+XT puts Bazzite at [92% of Windows](https://en.gamegpu.com/news/zhelezo/sravnenie-proizvoditelnosti-rx-9070-xt-i-rtx-5080-v-windows-11-i-linux-v-2026-godu)
+(127.9 against 138.6 FPS average), with CachyOS at 94%.
+
+Be careful with that number, though. It is an average, and per title the picture
+is genuinely mixed: on a 7900 XTX at 4K, SteamOS
+[wins Cyberpunk 2077 and Spider-Man 2](https://www.notebookcheck.net/Cyberpunk-2077-and-Red-Dead-Redemption-2-tested-at-4K-Ultra-on-SteamOS-and-Windows-11-offering-a-snapshot-of-Linux-gaming-in-2026.1201785.0.html)
+while Windows takes Forza Horizon 5 by a mile. GamersNexus, who ran the widest
+RDNA 4 set,
+[refuses to cross-compare their own numbers](https://gamersnexus.net/gpus/rip-windows-linux-gpu-gaming-benchmarks-bazzite)
+across the two operating systems at all, and flags compatibility issues, crashes
+and shader compilation stalls as the thing that actually shapes the experience.
+So: a real edge on average with new AMD silicon, not a rout.
+
+**Newest hardware, day one.** A GPU launches with a Windows driver. Linux
+support arrives when the kernel and Mesa catch up, which is exactly the gap RDNA
+4 spent most of its first year in.
+
+### What you give up, honestly
+
+Suspend and resume. SteamOS does it properly; Windows desktop does not, which is
+why [`power-console.ps1`](setup/power-console.ps1) exists and why hibernate is
+offered as the reliable fallback. And you need this project at all, whereas
+SteamOS ships a console experience out of the box.
 
 ## Why Windows 11 IoT Enterprise LTSC?
 
