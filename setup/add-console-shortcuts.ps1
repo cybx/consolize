@@ -25,6 +25,9 @@ param(
     [string]$ConsolizeExe = 'C:\Program Files\Consolize\consolize.exe',
     # The collection these end up in. Empty to leave them loose in the library.
     [string[]]$Collection = @('Consolize'),
+    # Take them out instead: every entry of ours, whatever it is called, and the
+    # artwork this wrote. The way back from a library that ended up with strays.
+    [switch]$Remove,
     [switch]$Force
 )
 $ErrorActionPreference = 'Stop'
@@ -33,9 +36,14 @@ if (-not (Test-Path $ConsolizeExe)) { throw "consolize.exe not found at $Consoli
 
 # --- the way back: a desktop shortcut ---------------------------------------
 
-$shell = New-Object -ComObject WScript.Shell
 $desktop = [Environment]::GetFolderPath('Desktop')
 $backLink = Join-Path $desktop 'Back to Console Mode.lnk'
+
+if ($Remove) {
+    if (Test-Path $backLink) { Remove-Item $backLink -Force; Write-Host "Removed $backLink" }
+} else {
+
+$shell = New-Object -ComObject WScript.Shell
 $lnk = $shell.CreateShortcut($backLink)
 $lnk.TargetPath = $ConsolizeExe
 $lnk.Arguments = 'send console'
@@ -43,6 +51,8 @@ $lnk.Description = 'Close the desktop and return to the console frontend'
 $lnk.IconLocation = "$ConsolizeExe,0"
 $lnk.Save()
 Write-Host "Desktop shortcut: $backLink"
+
+}
 
 # --- the way out: a non-Steam shortcut --------------------------------------
 
@@ -324,22 +334,58 @@ function Write-ShortcutArtwork {
     New-Art 1280 360  (Join-Path $GridDir "${unsigned}_logo.png") $true  0
 }
 
+# The appid moves whenever a name or a path does, and the artwork is filed under
+# it, so every such change strands four images. Deleting by guesswork is not an
+# option: this folder is also where someone's own cover art for their own games
+# lives, and a wrong guess throws away work. So we only ever delete ids we wrote
+# down ourselves.
+$manifestName = 'consolize-appids.txt'
+
+function Remove-StaleArtwork {
+    param([string]$GridDir, [uint32[]]$Keep)
+    $manifest = Join-Path $GridDir $manifestName
+    $known = @()
+    if (Test-Path $manifest) {
+        $known = @(Get-Content $manifest | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^\d+$' })
+    }
+    $keepText = @($Keep | ForEach-Object { "$_" })
+    foreach ($id in $known) {
+        if ($keepText -contains $id) { continue }
+        foreach ($suffix in @('p.png', '.png', '_hero.png', '_logo.png')) {
+            $file = Join-Path $GridDir "$id$suffix"
+            if (Test-Path $file) {
+                Remove-Item $file -Force -ErrorAction SilentlyContinue
+                Write-Host "      dropped stale artwork $id$suffix"
+            }
+        }
+    }
+    if ($keepText.Count) { Set-Content -Path $manifest -Value $keepText }
+    elseif (Test-Path $manifest) { Remove-Item $manifest -Force -ErrorAction SilentlyContinue }
+}
+
 # Artwork is written whether or not the entries need touching, and without
 # closing Steam: these are plain files read off disk, not state Steam holds in
 # memory. That way a machine set up before this existed picks it up on the next
 # update instead of needing the shortcuts rewritten.
 foreach ($userDir in $userDirs) {
     $gridDir = Join-Path $userDir.FullName 'config\grid'
+    if ($Remove) {
+        if (Test-Path $gridDir) { Remove-StaleArtwork -GridDir $gridDir -Keep @() }
+        continue
+    }
     New-Item -ItemType Directory -Force -Path $gridDir | Out-Null
+    $written = New-Object System.Collections.Generic.List[uint32]
     foreach ($entry in $entries) {
         $appId = Get-ShortcutAppId -Exe "`"$($entry.Exe)`"" -AppName $entry.Name
         try {
             Write-ShortcutArtwork -GridDir $gridDir -AppId $appId -Name $entry.Name `
                 -Glyph $entry.Glyph -Accent $entry.Accent
+            $written.Add([BitConverter]::ToUInt32([BitConverter]::GetBytes($appId), 0))
         } catch {
             Write-Warning "  could not draw the artwork for '$($entry.Name)': $($_.Exception.Message)"
         }
     }
+    Remove-StaleArtwork -GridDir $gridDir -Keep $written.ToArray()
     Write-Host "  $($userDir.Name): artwork written to config\grid"
 }
 
@@ -363,6 +409,24 @@ foreach ($entry in $entries) {
     }
 }
 
+# Whether an entry in someone's library is one of ours. The name alone was the
+# only test, and a name is the one thing that can drift: an entry added by hand
+# from Big Picture, or left by a version that called it something else, is not
+# recognised, is not replaced, and ends up sitting beside the real one under the
+# same name. What cannot drift is where it points, so that is asked too.
+function Test-EntryOurs {
+    param($Entry, [string]$ExePath, [string]$UpdateScript)
+    if (-not $Entry) { return $false }
+    if ($Entry.Name -and $wanted.ContainsKey($Entry.Name)) { return $true }
+    $target = ($Entry.Exe -replace '^"|"$', '')
+    if ($target -and $target -ieq $ExePath) { return $true }
+    if ($Entry.LaunchOptions -and $Entry.LaunchOptions -like "*$UpdateScript*") { return $true }
+    # a shortcut whose icon is our binary or our icon file was written by us
+    $icon = ($Entry.Icon -replace '^"|"$', '')
+    if ($icon -and ($icon -ieq $ExePath -or $icon -ieq $iconFile)) { return $true }
+    return $false
+}
+
 function Test-EntryCurrent {
     param($Found, $Wanted)
     if (-not $Found) { return $false }
@@ -381,6 +445,21 @@ foreach ($userDir in $userDirs) {
     if (-not (Test-Path $vdf)) { $needsWork = $true; break }
     try {
         $parsed = Read-ShortcutsVdf -Bytes ([IO.File]::ReadAllBytes($vdf))
+
+        if ($Remove) {
+            if ($parsed.Entries | Where-Object { Test-EntryOurs -Entry $_ -ExePath $ConsolizeExe -UpdateScript $updateScript }) {
+                $needsWork = $true; break
+            }
+            continue
+        }
+
+        # An entry of ours that is not one we would write now is a stray: a
+        # duplicate under a name we no longer use, or one left pointing
+        # somewhere else. Counting them is what notices the library has two of
+        # everything, which comparing the expected three never would.
+        $ours = @($parsed.Entries | Where-Object { Test-EntryOurs -Entry $_ -ExePath $ConsolizeExe -UpdateScript $updateScript })
+        if ($ours.Count -ne $entries.Count) { $needsWork = $true; break }
+
         foreach ($name in $wanted.Keys) {
             $mine = $parsed.Entries | Where-Object { $_.Name -eq $name } | Select-Object -First 1
             if (-not (Test-EntryCurrent -Found $mine -Wanted $wanted[$name])) { $needsWork = $true; break }
@@ -390,7 +469,8 @@ foreach ($userDir in $userDirs) {
 }
 
 if (-not $needsWork) {
-    Write-Host 'The Steam library already has the console entries, nothing to do.'
+    Write-Host $(if ($Remove) { 'No console entries in the Steam library, nothing to remove.' }
+                 else { 'The Steam library already has the console entries, nothing to do.' })
     return
 }
 
@@ -454,18 +534,25 @@ foreach ($userDir in $userDirs) {
         # Ask the parsed entries, not the raw bytes. The names can be present in
         # a file where Steam cannot reach them, and a substring match would call
         # that done and skip the machine forever.
-        $current = @($existing.Entries | Where-Object {
-            $wanted.ContainsKey($_.Name) -and (Test-EntryCurrent -Found $_ -Wanted $wanted[$_.Name])
-        })
-        if ($current.Count -eq $entries.Count) {
-            Write-Host "  $($userDir.Name): already has the console entries, leaving it alone."
+        $mine = @($existing.Entries | Where-Object { Test-EntryOurs -Entry $_ -ExePath $ConsolizeExe -UpdateScript $updateScript })
+
+        if (-not $Remove) {
+            $current = @($mine | Where-Object {
+                $wanted.ContainsKey($_.Name) -and (Test-EntryCurrent -Found $_ -Wanted $wanted[$_.Name])
+            })
+            if ($current.Count -eq $entries.Count -and $mine.Count -eq $entries.Count) {
+                Write-Host "  $($userDir.Name): already has the console entries, leaving it alone."
+                continue
+            }
+        } elseif ($mine.Count -eq 0) {
+            Write-Host "  $($userDir.Name): nothing of ours here."
             continue
         }
 
         $backup = "$vdf.consolize-backup"
         if (-not (Test-Path $backup)) { Copy-Item $vdf $backup }
 
-        $keep = @($existing.Entries | Where-Object { -not $wanted.ContainsKey($_.Name) })
+        $keep = @($existing.Entries | Where-Object { -not (Test-EntryOurs -Entry $_ -ExePath $ConsolizeExe -UpdateScript $updateScript) })
         $stale = $existing.Entries.Count - $keep.Count
 
         # Indexes, not a count: a file with entries 0, 1 and 5 has three of them,
@@ -491,8 +578,9 @@ foreach ($userDir in $userDirs) {
             $w.Write($bytes, $kept.Start, $kept.End - $kept.Start + 1)
         }
 
-        for ($i = 0; $i -lt $entries.Count; $i++) {
-            $entry = $entries[$i]
+        $toWrite = if ($Remove) { @() } else { $entries }
+        for ($i = 0; $i -lt $toWrite.Count; $i++) {
+            $entry = $toWrite[$i]
             $index = $firstIndex + $i
 
             $w.Write([byte]0)
@@ -550,8 +638,11 @@ foreach ($userDir in $userDirs) {
     # entries rather than merely that the bytes are in the file.
     try {
         $check = Read-ShortcutsVdf -Bytes $result
-        foreach ($entry in $entries) {
+        foreach ($entry in $toWrite) {
             if ($check.Names -notcontains $entry.Name) { throw "'$($entry.Name)' did not survive the round trip" }
+        }
+        if ($Remove -and ($check.Entries | Where-Object { Test-EntryOurs -Entry $_ -ExePath $ConsolizeExe -UpdateScript $updateScript })) {
+            throw 'an entry of ours survived the removal'
         }
     } catch {
         Write-Warning "  $($userDir.Name): built a shortcuts.vdf that does not read back ($($_.Exception.Message)). Nothing was written."
@@ -559,7 +650,13 @@ foreach ($userDir in $userDirs) {
     }
 
     [IO.File]::WriteAllBytes($vdf, $result)
-    Write-Host "  $($userDir.Name): $($check.Names.Count) shortcut(s) in the library, $($entries.Count) of them ours."
+    Write-Host "  $($userDir.Name): $($check.Names.Count) shortcut(s) in the library, $($toWrite.Count) of them ours."
+}
+
+if ($Remove) {
+    Write-Host ''
+    Write-Host 'Removed. Steam rebuilds its library list at startup, so open it again to see it.' -ForegroundColor Green
+    return
 }
 
 Write-Host ''

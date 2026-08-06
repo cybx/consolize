@@ -65,11 +65,14 @@ function Parse-Vdf {
         else { throw "bad type $t at $($p-1)" }
     }
     if ($depth -ne 0) { throw "$depth map(s) still open at EOF" }
-    return $out
+    # the comma matters: PowerShell unrolls a one element array on return, and a
+    # single entry would come back as the hashtable itself, whose .Count is its
+    # number of keys. Two checks "failed" on a result that was correct.
+    return , $out
 }
 
 function Build-SteamFile {
-    param([string[]]$Names, [int[]]$Indexes)
+    param([string[]]$Names, [int[]]$Indexes, [string[]]$Exes)
     $ms = New-Object IO.MemoryStream; $w = New-Object IO.BinaryWriter($ms)
     $w.Write([byte]0); $w.Write([Text.Encoding]::UTF8.GetBytes('shortcuts')); $w.Write([byte]0)
     for ($i = 0; $i -lt $Names.Count; $i++) {
@@ -78,8 +81,9 @@ function Build-SteamFile {
         $w.Write([byte]2); $w.Write([Text.Encoding]::UTF8.GetBytes('appid')); $w.Write([byte]0); $w.Write([int]-1234)
         $w.Write([byte]1); $w.Write([Text.Encoding]::UTF8.GetBytes('AppName')); $w.Write([byte]0)
         $w.Write([Text.Encoding]::UTF8.GetBytes($Names[$i])); $w.Write([byte]0)
+        $target = if ($Exes) { $Exes[$i] } else { 'C:\g\g.exe' }
         $w.Write([byte]1); $w.Write([Text.Encoding]::UTF8.GetBytes('Exe')); $w.Write([byte]0)
-        $w.Write([Text.Encoding]::UTF8.GetBytes('"C:\g\g.exe"')); $w.Write([byte]0)
+        $w.Write([Text.Encoding]::UTF8.GetBytes("`"$target`"")); $w.Write([byte]0)
         $w.Write([byte]0); $w.Write([Text.Encoding]::UTF8.GetBytes('tags')); $w.Write([byte]0); $w.Write([byte]8)
         $w.Write([byte]8)
     }
@@ -205,6 +209,44 @@ Remove-Item (Join-Path $root 'consolize.ico') -Force
 $got = Parse-Vdf ([IO.File]::ReadAllBytes($vdf))
 $desktop = @($got | Where-Object { $_.AppName -eq 'Desktop Mode' })
 Check 'and falls back to the exe when it is gone' ($desktop[0].icon -eq $exe) "got $($desktop[0].icon)"
+
+Write-Host "`n10. a stray of ours under a name we no longer use is cleaned up"
+# The library came back with two of everything. Recognising our entries only by
+# their exact name cannot see a duplicate added by hand or left by a version
+# that called it something else, so it sat there beside the real one. What
+# cannot drift is where an entry points, so that is what identifies it now.
+# the stray points at our exe, which is what makes it ours whatever it is called
+[IO.File]::WriteAllBytes($vdf, (Build-SteamFile -Names @('Cyberpunk', 'Modo Desktop') `
+    -Indexes @(0, 1) -Exes @('C:\g\g.exe', $exe)))
+& $script -ConsolizeExe $exe -Force | Out-Null
+$got = Parse-Vdf ([IO.File]::ReadAllBytes($vdf))
+Check 'the stray was recognised by its target and dropped' (
+    $got.AppName -notcontains 'Modo Desktop') "$($got.AppName -join ', ')"
+Check 'the real game was kept' ($got.AppName -contains 'Cyberpunk') "$($got.AppName -join ', ')"
+Check '4 entries, not 5' ($got.Count -eq 4) "got $($got.Count)"
+
+Write-Host "`n11. -Remove takes ours out and leaves the rest"
+& $script -ConsolizeExe $exe -Force -Remove | Out-Null
+$got = Parse-Vdf ([IO.File]::ReadAllBytes($vdf))
+Check 'only the game is left' ($got.Count -eq 1 -and $got[0].AppName -eq 'Cyberpunk') "$($got.AppName -join ', ')"
+Check 'the artwork went with them' ((Get-ChildItem $grid -Filter '*.png').Count -eq 0) `
+    "$((Get-ChildItem $grid -Filter '*.png').Count) file(s) left"
+Check 'the desktop shortcut is gone' (
+    -not (Test-Path (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Back to Console Mode.lnk'))) 'still there'
+& $script -ConsolizeExe $exe -Force -Remove 2>&1 | Out-Null
+$got = Parse-Vdf ([IO.File]::ReadAllBytes($vdf))
+Check 'removing twice is harmless' ($got.Count -eq 1) "got $($got.Count)"
+
+Write-Host "`n12. artwork from a previous appid does not pile up"
+& $script -ConsolizeExe $exe -Force | Out-Null
+$before = (Get-ChildItem $grid -Filter '*.png').Count
+$exe2 = Join-Path $root 'consolize-moved.exe'
+Copy-Item $exe $exe2 -Force
+& $script -ConsolizeExe $exe2 -Force | Out-Null
+$after = (Get-ChildItem $grid -Filter '*.png').Count
+Check 'the binary moved, the old images went too' ($after -eq $before) "$before before, $after after"
+Check 'and the entries followed it' (
+    (Parse-Vdf ([IO.File]::ReadAllBytes($vdf))).Count -eq 4) 'entry count changed'
 
 Write-Host ''
 if ($fail) { Write-Host "$fail check(s) failed" -ForegroundColor Red; exit 1 }
