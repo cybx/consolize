@@ -264,7 +264,10 @@ $entries = @(
 $extrasFile = Join-Path $env:ProgramData 'Consolize\extra-shortcuts.json'
 if (Test-Path $extrasFile) {
     try {
-        $extras = @(Get-Content $extrasFile -Raw | ConvertFrom-Json)
+        # No @() here: Windows PowerShell 5.1 emits a JSON array as one Object[]
+        # pipeline object, so wrapping it creates Object[] { Object[] { ... } }.
+        # foreach already handles an array, a single object and $null.
+        $extras = Get-Content $extrasFile -Raw | ConvertFrom-Json
         foreach ($extra in $extras) {
             if (-not $extra.name -or -not $extra.exe) {
                 Write-Warning "  an entry in extra-shortcuts.json has no name or no exe, skipping it"

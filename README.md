@@ -17,6 +17,7 @@
   <a href="#install">Install</a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="#quick-settings">Quick Settings</a> ·
+  <a href="#a-media-centre-too">Media</a> ·
   <a href="#taking-it-back-off">Uninstall</a> ·
   <a href="docs/architecture.md">Architecture</a>
 </p>
@@ -141,7 +142,7 @@ the Steam library during setup, so it is reachable from the couch.
 
 | Page | What it does |
 |---|---|
-| Sound | Switch output device (TV, headset, receiver) and set volume |
+| Audio | Switch output device (TV, headset, receiver) and set volume |
 | Bluetooth | Scan, pair and forget devices without the Settings app |
 | Controllers | How many pads are connected, and which devices may wake the machine |
 | Network | Connect to a saved wifi network |
@@ -157,18 +158,27 @@ or an HDMI-CEC adapter.
 XInput availability) without opening a window, which is the quick way to check a
 machine.
 
-No `Winlogon\Shell` registry rewrite, no scheduled task launching a VBS that launches a batch, no fixed 20-second sleeps.
+What it is not: a scheduled task launching a VBS that launches a batch, or a
+chain of fixed 20-second sleeps hoping the frontend is up by then. The one
+registry value it does write is the per-user `Winlogon\Shell` above, which is
+the documented way to give an account a different shell, and
+[`disable-shell-launcher.ps1`](setup/disable-shell-launcher.ps1) takes it back.
 
 ## Status
 
 | Phase | What | Status |
 |---|---|---|
 | F1 | Session manager (watchdog shell + desktop on demand) | **shipped** |
-| F2 | Quiet layer (Game Bar off, DND, update discipline, autologon via LSA, boot UI) | **first pass in `setup/`** |
-| F3 | Power: rest mode (sleep/hibernate profile, wake by controller, no core parking) | **first pass in `setup/`** |
+| F2 | Quiet layer (Game Bar off, DND, update discipline, autologon via LSA, boot UI) | **shipped**, and reversible with `-Restore` |
+| F3 | Power: rest mode (sleep/hibernate profile, wake by controller, no core parking) | **shipped**; `-Restore` records the previous scheme before changing it |
 | F4 | Controller-first quick settings (Bluetooth pairing, audio output, volume, wifi) without touching a desktop | **shipped** |
-| F0 | Provisioning: gaming bootstrap (GPU driver, runtimes, updates) + `autounattend.xml` | **bootstrap in `setup/`**, autounattend pending |
-| F5 | Remote maintenance (OpenSSH, second admin account, clean uninstall) | uninstall and recovery done: `uninstall-console.ps1`, `rescue.ps1`. Remote access still open |
+| F0 | Provisioning: gaming bootstrap (GPU driver, runtimes, updates) + `autounattend.xml` | **bootstrap shipped**, autounattend pending |
+| F5 | Remote maintenance (OpenSSH, second admin account, clean uninstall) | uninstall and rescue **shipped**; remote access still open |
+| F6 | Media: your own apps in the library, YouTube, and a media centre | **shipped** |
+
+Verified on hardware so far: everything up to the shell replacement. Four things
+are still only proven in a VM or not at all, and they are listed honestly in
+[docs/architecture.md](docs/architecture.md) rather than assumed here.
 
 ## Install
 
@@ -187,17 +197,21 @@ the GitHub contents API so a fix published a minute ago is the one that runs;
 `raw.githubusercontent.com` caches for minutes, which is long enough to run
 yesterday's code by accident. Its source is [`cloudflare/worker.js`](cloudflare/worker.js).
 
+It installs `consolize.exe` plus every setup script, then runs the whole
+provisioning, asking before each part. You answer a short interview once;
+everything after that is automatic, including the reboot and the account switch
+it needs.
+
 The setup scripts are copied to the machine at install time, so a fix published
 later does not reach it on its own. To pull the current ones without starting
 over:
 
 ```powershell
 & ([scriptblock]::Create((irm https://get-consolize.cybx.dev))) -UpdateOnly
-``` It installs `consolize.exe` plus every setup
-script and then runs the whole provisioning, asking before each part.
+```
 
-You answer a short interview once. Everything after that is automatic, including
-the reboot and the account switch it needs.
+From the console itself there is an **Update consolize** entry in the Steam
+library, which does the same thing plus winget upgrades and offers the restart.
 
 ### What the console account is allowed to do
 
@@ -457,11 +471,19 @@ Windows logo, this is what the machine shows on the way up.
 # once, inside the gamer session (no admin):
 ./setup/quiet-user.ps1                    # guide button goes to Steam, toasts off, tips off
 
-# undo:
-./setup/disable-shell-launcher.ps1 -UserName gamer
-./setup/set-autologon.ps1 -UserName gamer -Remove
-./setup/tune-defender.ps1 -Restore
+# optional, any time after setup:
+./setup/add-app-shortcut.ps1 -Name 'RetroArch' -Exe 'C:\RetroArch\retroarch.exe'
+./setup/install-youtube.ps1                # YouTube's TV interface, gamepad driven
+./setup/install-htpc.ps1                   # Kodi, Jellyfin, Plex, and the streaming sites
+
+# undo, all of it at once:
+./setup/uninstall-console.ps1              # add -WhatIfOnly to see the plan first
 ```
+
+Each piece still undoes itself alone (`disable-shell-launcher.ps1`,
+`set-autologon.ps1 -Remove`, `tune-defender.ps1 -Restore`, and `-Restore` on the
+rest), which is what `uninstall-console.ps1` calls in the order that keeps the
+machine signable-into at every step.
 
 See [docs/architecture.md](docs/architecture.md) for design decisions and the full roadmap.
 

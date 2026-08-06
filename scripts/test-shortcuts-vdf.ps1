@@ -270,7 +270,24 @@ try {
         ($savedExtras.Count -eq 1 -and $savedExtras[0].name -eq 'RetroArch') `
         (Get-Content $extrasFile -Raw)
 
+    $secondApp = Join-Path $root 'SecondApp.exe'
+    Set-Content $secondApp 'stub'
+    & $addApp -Name 'Second App' -Exe $secondApp -NoApply | Out-Null
+
+    # Apply while both are present. In Windows PowerShell 5.1, wrapping the
+    # ConvertFrom-Json call in @() turns its Object[] into a nested array and
+    # add-console-shortcuts used to treat both apps as one malformed entry.
     & $script -ConsolizeExe $exe -Force -Remove *> $null
+    & $script -ConsolizeExe $exe -Force | Out-Null
+    $got = Parse-Vdf ([IO.File]::ReadAllBytes($vdf))
+    Check 'multiple extras stay separate in Windows PowerShell 5.1' (
+        $got.AppName -contains 'RetroArch' -and $got.AppName -contains 'Second App') `
+        ($got.AppName -join ', ')
+
+    # Keep the remainder focused on the original extra. Remove the throwaway
+    # library entries while both are still recognisable, then drop the record.
+    & $script -ConsolizeExe $exe -Force -Remove *> $null
+    & $addApp -Name 'Second App' -Delete | Out-Null
     & $script -ConsolizeExe $exe -Force | Out-Null
     $got = Parse-Vdf ([IO.File]::ReadAllBytes($vdf))
     $extra = @($got | Where-Object { $_.AppName -eq 'RetroArch' })

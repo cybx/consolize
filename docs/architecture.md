@@ -82,6 +82,41 @@ still there:
 `enable-shell-launcher.ps1` runs preflight first and refuses to continue on any
 blocking issue unless `-SkipPreflight` is passed.
 
+## What is actually proven, and what is not
+
+Kept honest on purpose. A README that says "shipped" for everything is not much
+use to someone deciding whether to point this at their own machine, and the
+difference between "the tests pass" and "this was seen working on a television"
+is the whole difference here.
+
+**Proven on real hardware or a VM:**
+
+- The installer, the interview and the provisioning, end to end
+- Account creation, autologon with the password as an LSA secret
+- The Steam library entries: they appear, they carry their artwork, they land in
+  the Consolize collection, and launching one runs the target. Checked against a
+  live Steam install, not only against the tests
+- Edge in `--app` mode with a fresh profile, which is where its welcome flow
+  would otherwise take the screen
+- 61 automated checks over the shortcuts writer, plus static checks over every
+  script in the repository
+
+**Not proven yet, and said so rather than assumed:**
+
+1. **Shell replacement by the per-user registry method.** The mechanism is
+   documented and the script writes what it should, but a machine has not yet
+   been seen booting into the frontend this way.
+2. **The empty-screen watcher.** Leaving Big Picture should bring the desktop up
+   within `DesktopWhenNothingFillsScreenSeconds`; that path has not been watched
+   on a real session.
+3. **`quiet` elevation letting kernel anticheat install.** The reasoning is in
+   the README and it follows from how UAC works, but no anticheat has actually
+   been installed from the console account to confirm it.
+4. **`send desktop` from the library entry.** Reported as not working reliably
+   on a test VM whose library had duplicate entries; the duplicate question has
+   to be settled first, with `scripts/dump-shortcuts.ps1`, before that is a bug
+   in the handler rather than a click on the wrong entry.
+
 ## Test lab
 
 **Why not Docker:** Windows containers have no interactive logon session, no GUI and no Shell Launcher; a shell replacement cannot be exercised inside one. The disposable-environment instinct is right, though; the tool that delivers it on a Windows host is **Hyper-V with checkpoints**:
