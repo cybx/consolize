@@ -155,14 +155,20 @@ them work:
 
 | | what it does |
 |---|---|
-| `off` (default) | UAC off entirely (`EnableLUA = 0`). Nothing ever asks, which is what a console does. Everything the account runs is elevated, Steam and games included. |
-| `quiet` | UAC on, but administrators elevate without being asked. No prompts, and processes still start unelevated. |
+| `quiet` (default) | UAC on, but administrators elevate without being asked. Nothing prompts, and programs still start unprivileged. |
+| `off` | UAC off entirely (`EnableLUA = 0`). Nothing prompts either, but everything runs elevated from the start, integrity levels included. |
 | `prompt` | UAC on and still asking, moved off the secure desktop so an emulated mouse can answer. |
 
-The trade, plainly: `off` and `quiet` mean anything running as this account can
-gain administrator rights without you being asked. Reasonable for one person's
-console in a living room; not for a machine other people use. Setup asks, and
-leaving Windows alone is one of the answers.
+`quiet` is the default because it prompts exactly as never as `off` does, so the
+sofa experience is identical, while programs still start unprivileged. A game
+that goes wrong sits at medium integrity instead of having owned the machine
+since it launched, and the sandboxes in the browser and in packaged apps, which
+are built on integrity levels, keep working.
+
+The trade, plainly: both `quiet` and `off` mean anything running as this account
+can gain administrator rights without you being asked. Reasonable for one
+person's console in a living room; not for a machine other people use. Setup
+asks, and leaving Windows alone is one of the answers.
 
 (`off` used to break Store and packaged apps. That was fixed in Windows 10 build
 15063, so it no longer applies here.)

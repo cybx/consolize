@@ -14,15 +14,19 @@ emulation cannot click it either.
 Whichever mode is chosen, the account is made an administrator, because none of
 this works without that.
 
-  -Mode off     (default) UAC off entirely: EnableLUA = 0. Nothing ever asks,
-                and elevation just happens. This is what a console does, and it
-                is the reason the machine exists. Everything the account runs
-                is elevated, Steam and games included.
-                Needs a restart to take effect.
+  -Mode quiet   (default) UAC stays on, but administrators elevate without
+                being asked (ConsentPromptBehaviorAdmin = 0). Nothing ever
+                prompts, and yet programs still start unprivileged and only
+                gain rights when something actually asks for them. Same
+                convenience as turning UAC off, far smaller blast radius, which
+                is why it is the default.
 
-  -Mode quiet   UAC stays on, but administrators elevate without being asked
-                (ConsentPromptBehaviorAdmin = 0). No prompts either, and the
-                boundary between standard and elevated processes still exists.
+  -Mode off     UAC off entirely: EnableLUA = 0. Nothing ever asks either, but
+                everything the account runs is elevated from the moment it
+                starts, Steam and games included, and with it go integrity
+                levels (what the browser and packaged-app sandboxes are built
+                on) and registry and file virtualisation.
+                Needs a restart to take effect.
 
   -Mode prompt  UAC stays on and still asks, but on the normal desktop rather
                 than the secure one, so a controller-driven mouse can answer.
@@ -30,14 +34,20 @@ this works without that.
 
   -Restore      Windows defaults, and the account back to standard.
 
-The trade, plainly: off and quiet mean anything running as this account can gain
-administrator rights without you being asked. On one person's console in a
+The trade, plainly: off and quiet both mean anything running as this account can
+gain administrator rights without you being asked. On one person's console in a
 living room that is a reasonable thing to choose. On a machine other people use,
 it is not.
+
+Between those two, quiet is strictly the better deal. Both prompt exactly never,
+so the sofa experience is identical; the difference is only how much is running
+elevated while nothing has gone wrong. Under quiet a compromised game sits at
+medium integrity and cannot touch the system. Under off it was already at high
+integrity from the moment it launched.
 #>
 param(
     [Parameter(Mandatory)] [string]$UserName,
-    [ValidateSet('off', 'quiet', 'prompt')] [string]$Mode = 'off',
+    [ValidateSet('off', 'quiet', 'prompt')] [string]$Mode = 'quiet',
     [switch]$Restore
 )
 $ErrorActionPreference = 'Stop'
@@ -77,9 +87,10 @@ switch ($Mode) {
         Write-Host 'UAC off: nothing will ask for elevation again.'
         Set-Policy 'EnableLUA' 0
         Write-Host ''
-        Write-Host '  Everything this account runs will be elevated, Steam and games included.' -ForegroundColor Yellow
-        Write-Host '  Valve advises against running Steam elevated; in practice it works, and' -ForegroundColor Yellow
-        Write-Host '  it is the price of never seeing a prompt a controller cannot answer.' -ForegroundColor Yellow
+        Write-Host '  Everything this account runs will be elevated from the moment it starts,' -ForegroundColor Yellow
+        Write-Host '  Steam and games included, and integrity levels go with it, which is what' -ForegroundColor Yellow
+        Write-Host '  the browser and packaged-app sandboxes are built on.' -ForegroundColor Yellow
+        Write-Host '  -Mode quiet prompts just as never and keeps all of that.' -ForegroundColor Yellow
         Write-Host '  Takes effect after a restart.' -ForegroundColor Yellow
     }
 
@@ -90,8 +101,8 @@ switch ($Mode) {
         Set-Policy 'ConsentPromptBehaviorAdmin' 0
         Set-Policy 'PromptOnSecureDesktop' 0
         Write-Host ''
-        Write-Host '  No prompts, and processes still start unelevated until something asks' -ForegroundColor DarkGray
-        Write-Host '  for elevation, so the boundary itself is still there.' -ForegroundColor DarkGray
+        Write-Host '  Nothing prompts, and programs still start unprivileged: a game that goes' -ForegroundColor DarkGray
+        Write-Host '  wrong is stuck at medium integrity instead of owning the machine.' -ForegroundColor DarkGray
     }
 
     'prompt' {

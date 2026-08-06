@@ -296,10 +296,10 @@ if ($Unattended) {
     Write-Host "  All three answers below make '$UserName' an administrator, without which"
     Write-Host '  none of them work.'
     $elevation = Ask-Choice 'Elevation?' `
-        (@{ off    = 'UAC off entirely: nothing ever asks, like a console'
-            quiet  = 'UAC on, but elevates without asking'
+        (@{ quiet  = 'no prompts, but programs still start unprivileged'
+            off    = 'UAC off entirely: everything runs elevated from the start'
             prompt = 'UAC on and asks, moved where a controller can answer'
-            none   = 'leave Windows alone (anticheat games will need a keyboard once)' }) 'off'
+            none   = 'leave Windows alone (anticheat games will need a keyboard once)' }) 'quiet'
 
     Write-Host ''
     Write-Host '  Windows Firewall asks, with an elevated dialog, the first time a game opens'
