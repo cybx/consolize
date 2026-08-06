@@ -31,6 +31,13 @@ Set-RegValue 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryMan
 Set-RegValue 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'SystemPaneSuggestionsEnabled' 0
 Set-RegValue 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'SoftLandingEnabled' 0
 
+Write-Host 'Screen saver off (a console never interrupts what is on screen)...'
+# The screen saver is per user and survives every power setting: without this it
+# still cuts in over a paused game or a film.
+Set-RegValue 'HKCU:\Control Panel\Desktop' 'ScreenSaveActive' '0' 'String'
+Set-RegValue 'HKCU:\Control Panel\Desktop' 'ScreenSaveTimeOut' '0' 'String'
+Set-RegValue 'HKCU:\Control Panel\Desktop' 'ScreenSaverIsSecure' '0' 'String'
+
 Write-Host 'Touch keyboard pops up on any text field (no physical keyboard needed)...'
 # Windows only auto-invokes the touch keyboard on tablets by default. On a
 # couch PC there is no keyboard at all, so make it appear whenever a text field

@@ -6,9 +6,16 @@ password prompt, no screensaver mid-cutscene, no 3am wake-ups.
 
   .\power-console.ps1                       # sleep on power button (recommended)
   .\power-console.ps1 -RestMode Hibernate   # slower resume, survives power loss
-  .\power-console.ps1 -MonitorTimeout 30 -SleepTimeout 0
+  .\power-console.ps1 -MonitorTimeout 30    # blank the screen anyway, on OLED say
+  .\power-console.ps1 -SleepTimeout 60      # and suspend after an hour idle
   .\power-console.ps1 -ListWakeDevices      # what can wake this machine
   .\power-console.ps1 -Restore              # back to Windows defaults
+
+Neither the screen nor the machine switches itself off by default. That is on
+purpose: blanking the display drops the HDMI signal, so the television may change
+input by itself and the desktop can come back at a different resolution. A
+console leaves that to the TV, which is designed for it. On an OLED panel you
+may still want a timeout, hence -MonitorTimeout.
 
 Sleep vs hibernate, the honest trade:
   Sleep     resumes in ~2s and a USB receiver (8BitDo dongle and friends) can
@@ -18,7 +25,12 @@ Sleep vs hibernate, the honest trade:
 #>
 param(
     [ValidateSet('Sleep', 'Hibernate')] [string]$RestMode = 'Sleep',
-    [int]$MonitorTimeout = 20,
+    # 0 = never, and that is the right default on a TV. When Windows blanks the
+    # display it drops the HDMI signal: many TVs then switch input on their own,
+    # and coming back can reset the resolution and shuffle windows. A console
+    # leaves screen blanking to the television, which is built for it.
+    # Set a number of minutes if the panel is an OLED you worry about.
+    [int]$MonitorTimeout = 0,
     [int]$SleepTimeout = 0,
     [switch]$ListWakeDevices,
     [switch]$Restore
@@ -87,7 +99,7 @@ Write-Host 'No password on wake (a console does not ask who you are)...'
 Invoke-PowerCfg /setacvalueindex SCHEME_CURRENT SUB_NONE CONSOLELOCK 0
 Invoke-PowerCfg /setdcvalueindex SCHEME_CURRENT SUB_NONE CONSOLELOCK 0
 
-Write-Host "Timeouts: screen off after $MonitorTimeout min, sleep $(if ($SleepTimeout -eq 0) { 'never (movies and downloads keep running)' } else { "after $SleepTimeout min" })..."
+Write-Host "Timeouts: screen $(if ($MonitorTimeout -eq 0) { 'never blanked (the TV handles that; blanking drops HDMI)' } else { "off after $MonitorTimeout min" }), sleep $(if ($SleepTimeout -eq 0) { 'never (movies and downloads keep running)' } else { "after $SleepTimeout min" })..."
 Invoke-PowerCfg /change monitor-timeout-ac $MonitorTimeout
 Invoke-PowerCfg /change standby-timeout-ac $SleepTimeout
 Invoke-PowerCfg /change disk-timeout-ac 0
