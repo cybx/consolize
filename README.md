@@ -74,7 +74,7 @@ No `Winlogon\Shell` registry rewrite, no scheduled task launching a VBS that lau
 | F3 | Power: rest mode (sleep/hibernate profile, wake by controller, no core parking) | **first pass in `setup/`** |
 | F4 | Controller-first quick settings (Bluetooth pairing, audio output, volume, wifi) without touching a desktop | **shipped** |
 | F0 | Provisioning: gaming bootstrap (GPU driver, runtimes, updates) + `autounattend.xml` | **bootstrap in `setup/`**, autounattend pending |
-| F5 | Remote maintenance (OpenSSH, second admin account, clean uninstall) | planned |
+| F5 | Remote maintenance (OpenSSH, second admin account, clean uninstall) | partly: `rescue.ps1` handles the recovery half |
 
 ## Install
 
