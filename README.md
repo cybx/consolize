@@ -88,8 +88,15 @@ the Steam library during setup, so it is reachable from the couch.
 |---|---|
 | Sound | Switch output device (TV, headset, receiver) and set volume |
 | Bluetooth | Scan, pair and forget devices without the Settings app |
+| Controllers | How many pads are connected, and which devices may wake the machine |
 | Network | Connect to a saved wifi network |
 | Power | Back to console, desktop mode, restart frontend, sleep, restart, shut down |
+
+The Controllers page covers the setting that decides whether a button on the pad
+turns the console back on. It used to live in Device Manager, which is precisely
+where a controller cannot go. Note it only applies to **sleep**: nothing on USB
+wakes a hibernated machine, so with `-RestMode Hibernate` it is the case button
+or an HDMI-CEC adapter.
 
 `consolize panel --diag` prints what it can see (audio devices, Bluetooth radio,
 XInput availability) without opening a window, which is the quick way to check a

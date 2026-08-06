@@ -240,8 +240,42 @@ internal static class Program
         var pad = new Interop.Gamepad();
         pad.Poll();
         Console.WriteLine($"  XInput available: {Interop.Gamepad.Available}");
+        Console.WriteLine($"  connected now: {Interop.Gamepad.ConnectedCount()}");
+
+        Console.WriteLine();
+        Console.WriteLine("=== may wake the machine ===");
+        foreach (var line in RunForDiagnostics("powercfg.exe", "/devicequery wake_armed"))
+        {
+            Console.WriteLine($"  armed: {line}");
+        }
+        var programmable = RunForDiagnostics("powercfg.exe", "/devicequery wake_programmable").Count;
+        Console.WriteLine($"  ({programmable} device(s) could be allowed to)");
 
         return 0;
+    }
+
+    private static List<string> RunForDiagnostics(string file, string arguments)
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo(file, arguments)
+            {
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            });
+            if (process is null) return new List<string>();
+            var output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit(15000);
+            return output.Split('\n')
+                .Select(l => l.Trim())
+                .Where(l => l.Length > 0 && !l.StartsWith("NONE", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+        catch (Exception)
+        {
+            return new List<string>();
+        }
     }
 
     private static void OpenPanel()

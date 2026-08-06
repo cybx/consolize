@@ -13,7 +13,7 @@ namespace Consolize.SessionManager;
 /// </summary>
 internal sealed class QuickSettingsForm : Form
 {
-    private enum Page { Audio, Bluetooth, Network, Power }
+    private enum Page { Audio, Bluetooth, Controllers, Network, Power }
 
     private readonly System.Windows.Forms.Timer _padTimer = new() { Interval = 33 };
     private readonly Gamepad _pad = new();
@@ -128,6 +128,7 @@ internal sealed class QuickSettingsForm : Form
         {
             case Page.Audio: RenderAudio(); break;
             case Page.Bluetooth: RenderBluetooth(); break;
+            case Page.Controllers: RenderControllers(); break;
             case Page.Network: RenderNetwork(); break;
             case Page.Power: RenderPower(); break;
         }
@@ -222,6 +223,108 @@ internal sealed class QuickSettingsForm : Form
                     _btDevices = result.Devices;
                     SetStatus($"{captured.Name}: {result.Message}");
                 }));
+        }
+    }
+
+    private List<string> _wakeDevices = new();
+    private List<string> _wakeArmed = new();
+    private bool _wakeLoaded;
+
+    /// <summary>
+    /// Which devices are allowed to wake the machine. This is the setting that
+    /// decides whether pressing a button on the controller turns the console
+    /// back on, and until now it lived in Device Manager, which is exactly the
+    /// place a controller cannot reach.
+    ///
+    /// Only from sleep: nothing on USB wakes a hibernated machine, so on
+    /// hibernate it is the case button or an HDMI-CEC adapter.
+    /// </summary>
+    private void RenderControllers()
+    {
+        _header.Text = "Controllers";
+
+        var pads = Gamepad.ConnectedCount();
+        SetStatus(Gamepad.Available
+            ? $"{pads} controller(s) connected. A is select, B closes."
+            : "XInput is not available on this machine");
+
+        if (!_wakeLoaded)
+        {
+            _wakeLoaded = true;
+            RunInBackground("reading which devices may wake the machine...",
+                () => (All: ParsePowercfgList("wake_programmable"), Armed: ParsePowercfgList("wake_armed")),
+                result =>
+                {
+                    _wakeDevices = result.All;
+                    _wakeArmed = result.Armed;
+                    SetStatus($"{pads} controller(s) connected");
+                });
+            Add("reading devices...", () => { });
+            return;
+        }
+
+        if (_wakeDevices.Count == 0)
+        {
+            Add("no device on this machine can wake it", () => { });
+            Add("(a 2.4G receiver usually can; Bluetooth usually cannot)", () => { });
+            return;
+        }
+
+        Add("Wake the console with these devices:", () => { });
+        foreach (var device in _wakeDevices)
+        {
+            var armed = _wakeArmed.Contains(device, StringComparer.OrdinalIgnoreCase);
+            var captured = device;
+            var name = device.Length > 60 ? device.Substring(0, 57) + "..." : device;
+
+            Add($"{(armed ? "[on ]" : "[off]")} {name}", () => RunInBackground(
+                armed ? $"stopping {name} from waking the machine..." : $"letting {name} wake the machine...",
+                () =>
+                {
+                    // powercfg needs elevation; on a console account set up by
+                    // this project that is granted without a prompt.
+                    RunElevated("powercfg.exe",
+                        $"/device{(armed ? "disable" : "enable")}wake \"{captured}\"");
+                    return (All: ParsePowercfgList("wake_programmable"), Armed: ParsePowercfgList("wake_armed"));
+                },
+                result =>
+                {
+                    _wakeDevices = result.All;
+                    _wakeArmed = result.Armed;
+                    SetStatus(result.Armed.Contains(captured, StringComparer.OrdinalIgnoreCase)
+                        ? $"{name} can now wake the console"
+                        : $"{name} will no longer wake the console");
+                }));
+        }
+    }
+
+    private static List<string> ParsePowercfgList(string query)
+    {
+        return RunCommand("powercfg.exe", $"/devicequery {query}")
+            .Split('\n')
+            .Select(line => line.Trim())
+            .Where(line => line.Length > 0 && !line.StartsWith("NONE", StringComparison.OrdinalIgnoreCase))
+            .Distinct()
+            .ToList();
+    }
+
+    private static void RunElevated(string file, string arguments)
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo(file, arguments)
+            {
+                UseShellExecute = true,
+                Verb = "runas",
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+            });
+            process?.WaitForExit(20000);
+        }
+        catch (Exception)
+        {
+            // elevation refused, or no such device: the caller re-reads the
+            // state either way and shows what actually happened
         }
     }
 

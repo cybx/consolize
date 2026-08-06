@@ -41,6 +41,27 @@ internal sealed class Gamepad
 
     public static bool Available { get; private set; } = true;
 
+    /// <summary>How many XInput pads are plugged in or paired right now.</summary>
+    public static int ConnectedCount()
+    {
+        if (!Available) return 0;
+
+        var connected = 0;
+        for (uint i = 0; i < 4; i++)
+        {
+            try
+            {
+                if (XInputGetState(i, out _) == 0) connected++;
+            }
+            catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+            {
+                Available = false;
+                return 0;
+            }
+        }
+        return connected;
+    }
+
     /// <summary>Buttons that went down since the last poll, plus auto-repeat
     /// for the directions while they are held.</summary>
     public PadButton Poll()
