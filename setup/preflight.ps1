@@ -202,8 +202,37 @@ if ($autostart.Count -gt 0) {
 $targetUser = Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue
 if ($targetUser) {
     Write-Check PASS "User '$UserName' exists" ''
+
+    # An account whose password was never set has no PasswordLastSet, and
+    # Windows reads that as "must set a password at the next sign-in": it stops
+    # at the logon screen and automatic logon never fires.
+    if (-not $targetUser.PasswordLastSet) {
+        Write-Check FAIL "'$UserName' would be asked to set a password" @"
+Its password has never been set (PasswordLastSet is empty), so Windows stops at
+the logon screen asking for one and autologon does not happen. Fix:
+  Set-LocalUser -Name $UserName -Password (New-Object System.Security.SecureString)
+  Set-LocalUser -Name $UserName -PasswordNeverExpires `$true
+"@
+    } elseif ($targetUser.PasswordExpires -and $targetUser.PasswordExpires -lt (Get-Date)) {
+        Write-Check FAIL "'$UserName' has an expired password" @"
+Windows will demand a new one at sign-in, which a controller cannot type. Fix:
+  Set-LocalUser -Name $UserName -PasswordNeverExpires `$true
+"@
+    }
 } else {
     Write-Check FAIL "User '$UserName' does not exist" 'Create it, or pass the right -UserName.'
+}
+
+# --- the screens that appear before the frontend ever starts -----------------
+$privacyPolicy = (Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\OOBE' `
+    -Name DisablePrivacyExperience -ErrorAction SilentlyContinue).DisablePrivacyExperience
+if ($privacyPolicy -eq 1) {
+    Write-Check PASS 'Privacy settings screen suppressed' ''
+} else {
+    Write-Check FAIL 'Privacy settings screen would appear' @'
+A new account's first sign-in lands on "choose privacy settings" full screen,
+which needs a mouse and blocks the frontend. Fix: .\quiet-machine.ps1
+'@
 }
 
 $admins = Get-LocalGroupMember -Group 'Administrators' -ErrorAction SilentlyContinue |

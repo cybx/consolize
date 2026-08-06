@@ -301,12 +301,27 @@ if (-not (Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue)) {
     } else {
         New-LocalUser -Name $UserName -NoPassword -FullName 'Console' `
             -Description 'consolize console account' | Out-Null
-        Write-Host '  created with no password (fine for a console that logs itself in)'
+        Write-Host '  created with no password'
     }
 
     Add-LocalGroupMember -Group 'Users' -Member $UserName -ErrorAction SilentlyContinue
     Write-Host "  '$UserName' created."
 }
+
+# A brand new account has no PasswordLastSet, and Windows reads that as "must
+# set a password at the next sign-in": it stops at the logon screen asking for
+# one, and automatic logon simply never happens. Setting the password
+# explicitly, even an empty one, stamps PasswordLastSet and clears that state.
+$account = Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue
+if ($account -and -not $account.PasswordLastSet) {
+    try {
+        Set-LocalUser -Name $UserName -Password (New-Object System.Security.SecureString) -ErrorAction Stop
+        Write-Host "  '$UserName' password state stamped (no blank-password prompt at logon)"
+    } catch {
+        Write-Warning "  could not stamp the password state: $($_.Exception.Message)"
+    }
+}
+try { Set-LocalUser -Name $UserName -PasswordNeverExpires $true -ErrorAction Stop } catch { }
 
 $otherAdmins = Get-LocalGroupMember -Group 'Administrators' -ErrorAction SilentlyContinue |
     Where-Object { $_.ObjectClass -eq 'User' -and $_.Name -notlike "*\$UserName" }

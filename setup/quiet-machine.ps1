@@ -23,6 +23,13 @@ Set-RegValue 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization' 'NoLock
 Write-Host 'First-logon animation off...'
 Set-RegValue 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' 'EnableFirstLogonAnimation' 0
 
+Write-Host 'Privacy settings screen off (it appears at every new account first sign-in)...'
+# Without this, the console account's first sign-in lands on "choose privacy
+# settings" full screen. It wants a mouse, a controller cannot dismiss it, and
+# the frontend never gets to start.
+Set-RegValue 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\OOBE' 'DisablePrivacyExperience' 1
+Set-RegValue 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE' 'DisablePrivacyExperience' 1
+
 Write-Host 'Startup sound off...'
 Set-RegValue 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI\BootAnimation' 'DisableStartupSound' 1
 

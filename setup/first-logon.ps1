@@ -141,6 +141,19 @@ if ($bootInto -ne 'steam') {
         Write-Host '  Scanning the QR with the Steam mobile app is the easiest here, since'
         Write-Host '  it skips typing a password on a TV.'
         Write-Host ''
+
+        # Steam's login window is Chromium, and the Windows touch keyboard only
+        # auto-invokes for fields that speak TSF, so clicking the email box
+        # summons nothing. osk.exe is the classic on-screen keyboard: a plain
+        # window that types into whatever has focus, including Chromium.
+        try {
+            Start-Process "$env:WINDIR\System32\osk.exe" -ErrorAction Stop
+            Write-Host '  An on-screen keyboard is open in case you type the password:'
+            Write-Host '  Steam''s own login box does not summon the Windows one by itself.'
+        } catch {
+            Write-Host '  (could not open the on-screen keyboard; the QR sign-in needs no typing)'
+        }
+
         Start-Process (Join-Path $steam 'steam.exe')
 
         Write-Host '  Waiting for the sign-in. Press Enter once you are in and I will check.'
