@@ -2,11 +2,66 @@
   <img src="assets/logo-dark.png" alt="consolize" width="560">
 </p>
 
-# consolize
+<p align="center">
+  <strong>A controller-first Windows gaming console that still has a desktop when you need one.</strong>
+</p>
 
-Turn a Windows 11 PC into a couch gaming console. The machine boots straight into Steam Big Picture (or Playnite Fullscreen), survives frontend crashes without ever showing a black screen or a desktop, and Explorer only appears when you explicitly ask for it.
+<p align="center">
+  <a href="https://github.com/cybx/consolize/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/cybx/consolize/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/cybx/consolize/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/cybx/consolize?display_name=tag"></a>
+  <img alt="Windows 11" src="https://img.shields.io/badge/Windows-11-0078D4?logo=windows11&logoColor=white">
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
+</p>
 
-Think SteamOS "Game Mode", but on Windows.
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#quick-settings">Quick Settings</a> ·
+  <a href="#taking-it-back-off">Uninstall</a> ·
+  <a href="docs/architecture.md">Architecture</a>
+</p>
+
+# Turn Windows into a console
+
+consolize turns a dedicated Windows 11 PC into a couch gaming console. It boots
+straight into Steam Big Picture or Playnite Fullscreen, recovers when the
+frontend crashes, and keeps the Windows desktop one controller-friendly action
+away.
+
+Think SteamOS Game Mode, for the games and hardware that need Windows.
+
+```powershell
+irm https://get-consolize.cybx.dev | iex
+```
+
+The guided installer elevates itself, asks what you want once, provisions the
+machine, creates a dedicated console account and carries the setup across the
+required reboots.
+
+## What you get
+
+| | |
+|---|---|
+| **Console boot** | Automatic sign-in directly to Steam Big Picture or Playnite Fullscreen, with no desktop flash |
+| **Self-healing frontend** | A watchdog restarts a crashed frontend and falls back to the desktop instead of leaving a black screen |
+| **Desktop on demand** | Enter from the Steam library; return through the tray icon or desktop shortcut; reboot always returns to console mode |
+| **Gamepad Quick Settings** | Audio output and volume, Bluetooth pairing, controller wake, wifi and power controls |
+| **Console-style Windows** | Quiet notifications, controlled updates, silent boot, gaming runtimes, power tuning and optional startup cleanup |
+| **SteaMidra integration** | Optionally installs the latest upstream Windows build and adds it to Steam automatically |
+| **Safe way back** | A separate administrator keeps its ordinary desktop; rescue and uninstall scripts restore the Windows experience |
+
+## Before you install
+
+This project replaces the Windows shell **for one dedicated account** and makes
+machine-wide system changes. Use it on a gaming PC, handheld or test VM—not on
+the only account of a work machine. Keep a second administrator account as the
+recovery path.
+
+Windows 11 IoT Enterprise LTSC 2024 is the primary tested target. Home, Pro,
+Education and regular Enterprise can use the default registry shell method;
+some optional provisioning features vary by edition. A keyboard is still useful
+for the initial Windows and Steam sign-ins, even though everyday operation is
+designed for a controller.
 
 ## Why not just use SteamOS or Bazzite?
 
@@ -124,7 +179,8 @@ irm https://get-consolize.cybx.dev | iex
 ```
 
 No need to open PowerShell as administrator: it asks for elevation itself and
-continues in the elevated window.
+continues in the elevated window. Setup disables QuickEdit, so clicking inside
+that window does not silently pause the installer.
 
 That address is a Cloudflare Worker in front of this repository, reading through
 the GitHub contents API so a fix published a minute ago is the one that runs;
@@ -201,6 +257,15 @@ another account's behalf:
 3. A SYSTEM task notices the account is ready, preflights, replaces the shell
    and reboots into console mode.
 
+On the first reboot, Windows may show the blue PowerShell window with no text
+briefly while `powershell.exe` cold-starts and the new user profile settles. No
+script can draw before that process is ready. As soon as phase 2 begins it now
+prints `consolize: starting the first-logon setup...` and keeps all subsequent
+work in that same window; it no longer closes it and relaunches another
+PowerShell that looks blank. QuickEdit is disabled directly in the live console
+through the Windows console API, as well as in the account's saved console
+settings, so an accidental click cannot freeze this phase either.
+
 If the Steam sign-in never happens, step 3 refuses to replace the shell and says
 why: booting into a login window a controller cannot fill in would strand you.
 Cancel a setup in progress with `.\setup-console.ps1 -Abort`.
@@ -264,10 +329,11 @@ television.
 
 ### SteaMidra
 
-The software interview offers SteaMidra by default. Consolize resolves the
-latest GitHub release at install time, downloads its Windows ZIP, extracts it
-with 7-Zip to `C:\Program Files\SteaMidra`, and adds **SteaMidra** to Steam as a
-non-Steam app. Run or update it on its own with:
+The software interview offers [SteaMidra](https://github.com/Midrags/SFF) as an
+optional integration. Consolize resolves its latest upstream GitHub release at
+install time, downloads the Windows ZIP, extracts it with 7-Zip to
+`C:\Program Files\SteaMidra`, and adds **SteaMidra** to Steam as a non-Steam
+app. Run or update it on its own with:
 
 ```powershell
 .\install-steamidra.ps1
@@ -368,8 +434,28 @@ See [docs/architecture.md](docs/architecture.md) for design decisions and the fu
 
 ## Credits
 
-Idea inspired by [GamesDows](https://github.com/jazir555/GamesDows) by jazir555, which pioneered "boot Windows into Big Picture" with batch scripts. consolize is a from-scratch implementation, with no code reused.
+consolize stands on ideas and software from the wider Windows and couch-gaming
+community:
+
+- [GamesDows](https://github.com/jazir555/GamesDows) by
+  [jazir555](https://github.com/jazir555) pioneered the idea of booting Windows
+  directly into Steam Big Picture or Playnite as a console experience. consolize
+  is a from-scratch implementation and reuses no GamesDows code.
+- [SteaMidra](https://github.com/Midrags/SFF), made by Midrag and his brother, is
+  available as an optional third-party integration. Consolize downloads its
+  official release and creates the Steam library entry; SteaMidra remains its
+  own GPL-3.0 project with its own documentation and terms.
+- [VacuumTube](https://github.com/shy1132/VacuumTube) by
+  [shy1132](https://github.com/shy1132) provides the optional controller-aware
+  YouTube TV experience installed by `install-youtube.ps1`.
+- Thanks to everyone reporting hardware quirks, testing clean Windows installs
+  and contributing fixes. Issues and pull requests are welcome.
+
+Steam and SteamOS are trademarks of Valve Corporation. Windows is a trademark
+of Microsoft Corporation. consolize is an independent project and is not
+affiliated with or endorsed by Valve, Microsoft, GamesDows, SteaMidra or
+VacuumTube.
 
 ## License
 
-MIT
+[MIT](LICENSE) © 2026 Victor Corrêa.
