@@ -46,6 +46,24 @@ O instalador pede elevação sozinho, pergunta o que você quer uma vez só,
 prepara a máquina, cria uma conta dedicada para o console e conduz a instalação
 através dos reinícios necessários.
 
+> [!WARNING]
+> **Isso é para uma máquina que você está disposto a dedicar, não para a sua
+> máquina do dia a dia nem para a do trabalho.**
+>
+> O shell só é substituído numa segunda conta, criada por ele, então a conta que
+> você usa hoje mantém o desktop normal. Mas a instalação também muda a máquina
+> inteira: Defender, UAC, firewall, plano de energia e tela de boot. Ela pergunta
+> sobre cada um deles e "não mexer" é sempre uma das respostas, e o
+> [`uninstall-console.ps1`](setup/uninstall-console.ps1) devolve tudo, mas você
+> tem que saber disso antes de rodar a linha acima, não depois.
+>
+> A lista completa, com o que cada mudança custa e o script que a reverte, está
+> em [o que ele muda na sua máquina](#o-que-ele-muda-na-sua-máquina).
+>
+> Use um disco reserva ou uma VM, se você tiver. Se não tiver, faça uma imagem do
+> sistema antes. Esse conselho vale para qualquer projeto que substitua o shell
+> do Windows, este incluído.
+
 ## O que você ganha
 
 | | |

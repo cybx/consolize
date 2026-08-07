@@ -45,6 +45,24 @@ The guided installer elevates itself, asks what you want once, provisions the
 machine, creates a dedicated console account and carries the setup across the
 required reboots.
 
+> [!WARNING]
+> **This is for a machine you are willing to dedicate to it, not your daily
+> driver and not a work PC.**
+>
+> The shell is only replaced for a second account it creates, so the account you
+> use now keeps its normal desktop. But the setup also changes the machine as a
+> whole: Defender, UAC, the firewall, the power plan and the boot screen. Setup
+> asks about each of those and "leave it alone" is always one of the answers, and
+> [`uninstall-console.ps1`](setup/uninstall-console.ps1) puts them back, but you
+> should know that before running the line above, not after.
+>
+> The full list, with what each one costs and the script that reverses it, is in
+> [what it changes on your machine](#what-it-changes-on-your-machine).
+>
+> Use a spare drive or a VM if you have one. If you do not, take a system image
+> first. That advice applies to any project that replaces the Windows shell,
+> this one included.
+
 ## What you get
 
 | | |
