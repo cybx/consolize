@@ -186,6 +186,20 @@ if (-not $exeSource) {
 
 New-Item -ItemType Directory -Force -Path $ScriptDir | Out-Null
 Copy-Item (Join-Path $extracted.FullName 'setup\*.ps1') $ScriptDir -Force
+
+# Belt and braces against "cannot be loaded because it is not digitally signed".
+# Measured, so the reasoning is not overstated: a zip fetched with
+# Invoke-WebRequest does NOT carry the Mark of the Web, so this install path does
+# not create the problem. One taken from a browser does, and someone who
+# downloaded the repository by hand and ran the scripts from there would hit it
+# under RemoteSigned. Costs nothing here and removes that case.
+#
+# What this cannot fix is a machine set to AllSigned or Restricted, where an
+# unsigned script is refused no matter where it came from. That is why the
+# README gives the -ExecutionPolicy Bypass form: it is the one that works
+# everywhere, and it matters most for the uninstaller, the script someone runs
+# when they have already decided they want out.
+Get-ChildItem (Join-Path $ScriptDir '*.ps1') | Unblock-File -ErrorAction SilentlyContinue
 Write-Host "Setup scripts installed to $ScriptDir"
 
 # Earlier versions installed to ProgramData, which any user can write to. Clear

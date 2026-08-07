@@ -579,8 +579,16 @@ O `rescue.ps1` é para uma instalação que deu errado, e só desfaz o que pode
 esconder a tela. Para remover o consolize por completo:
 
 ```powershell
-& 'C:\Program Files\Consolize\setup\uninstall-console.ps1'
+powershell -ExecutionPolicy Bypass -File "C:\Program Files\Consolize\setup\uninstall-console.ps1"
 ```
+
+Rode isso de um PowerShell **como administrador**. O `-ExecutionPolicy Bypass`
+não é superstição: o Windows recusa script não assinado por padrão, e avisa isso
+como "não pode ser carregado porque não está assinado digitalmente", que é uma
+coisa confusa de se ouvir sobre um arquivo que está em Program Files. O
+instalador desbloqueia o que grava, então o `& '...\uninstall-console.ps1'`
+também funciona numa máquina em `RemoteSigned`, mas a linha acima funciona em
+qualquer uma e é a que usar se a outra for recusada.
 
 Ele devolve o shell primeiro, para que uma falha em qualquer passo seguinte ainda
 deixe uma máquina em que você consegue entrar, e então restaura Defender, firewall,

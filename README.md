@@ -559,8 +559,16 @@ any of that.
 screen. To remove consolize entirely:
 
 ```powershell
-& 'C:\Program Files\Consolize\setup\uninstall-console.ps1'
+powershell -ExecutionPolicy Bypass -File "C:\Program Files\Consolize\setup\uninstall-console.ps1"
 ```
+
+Run that from an **administrator** PowerShell. The `-ExecutionPolicy Bypass` is
+not superstition: Windows refuses unsigned scripts by default, and reports it as
+"cannot be loaded because it is not digitally signed", which is a confusing
+thing to be told about a file in Program Files. The installer unblocks what it
+writes, so `& '...\uninstall-console.ps1'` works too on a machine set to
+`RemoteSigned`, but the line above works everywhere and is the one to use if the
+other is refused.
 
 It puts the shell back first, so a failure in any later step still leaves a
 machine you can sign into, then restores Defender, the firewall, UAC, the power
