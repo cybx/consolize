@@ -62,6 +62,27 @@ internal sealed class Gamepad
         return connected;
     }
 
+    /// <summary>Buttons held right now, with no edge detection and no repeat.
+    /// The panel wants presses; a chord wants to know something has been held
+    /// for a while, which an edge triggered read cannot answer.</summary>
+    public static PadButton ReadHeldStatic()
+    {
+        var held = PadButton.None;
+        if (!Available) { return held; }
+
+        for (uint i = 0; i < 4; i++)
+        {
+            try
+            {
+                if (XInputGetState(i, out var state) != 0) { continue; }
+                held |= (PadButton)(state.Gamepad.Buttons & 0xF33F);
+            }
+            catch (DllNotFoundException) { Available = false; return PadButton.None; }
+            catch (EntryPointNotFoundException) { Available = false; return PadButton.None; }
+        }
+        return held;
+    }
+
     /// <summary>Buttons that went down since the last poll, plus auto-repeat
     /// for the directions while they are held.</summary>
     public PadButton Poll()

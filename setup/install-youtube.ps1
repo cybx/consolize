@@ -91,6 +91,41 @@ if ($installed -and $installedVersion -eq $release.tag_name) {
     Write-Host "  installed: $installed" -ForegroundColor Green
 }
 
+# --- make it open like an appliance, not like a program ---------------------
+# VacuumTube launches windowed with a title bar, which on a television reads as
+# a program someone left open rather than as YouTube. The settings that fix
+# that live in its own config, reachable in the app with R3, but nobody should
+# have to find them on first run. Its defaults are in src/config.js upstream,
+# and unknown keys are ignored, so writing only what we care about is safe.
+$configDir = Join-Path $env:APPDATA 'VacuumTube'
+$configFile = Join-Path $configDir 'config.json'
+
+$wanted = [ordered]@{
+    fullscreen             = $true   # and it remembers, so every launch is fullscreen
+    no_window_decorations  = $true   # no title bar over the video
+    controller_support     = $true   # the whole reason this app was chosen
+    pause_on_blur          = $true   # chord back to the console and the video stops
+}
+
+try {
+    New-Item -ItemType Directory -Force -Path $configDir | Out-Null
+    $config = [ordered]@{}
+    if (Test-Path $configFile) {
+        # Merge, never replace: this file also holds the volume, the ad block
+        # and SponsorBlock choices, and a SponsorBlock id that identifies this
+        # install. Overwriting it would silently reset all of that.
+        (Get-Content $configFile -Raw | ConvertFrom-Json).PSObject.Properties |
+            ForEach-Object { $config[$_.Name] = $_.Value }
+    }
+    foreach ($key in $wanted.Keys) { $config[$key] = $wanted[$key] }
+
+    ConvertTo-Json -InputObject $config -Depth 6 | Set-Content $configFile -Encoding UTF8
+    Write-Host "  set to open fullscreen, without a title bar, pausing when it loses focus"
+} catch {
+    Write-Warning "  could not preset VacuumTube's settings: $($_.Exception.Message)"
+    Write-Warning '  turn on Fullscreen inside the app: press R3 on the controller.'
+}
+
 if ($NoShortcut) { return }
 
 # In the library rather than only on the desktop, because on this machine the
@@ -104,3 +139,8 @@ Write-Host ''
 Write-Host ''
 Write-Host 'Sign in from the couch: open YouTube, go to Settings, and use "Link with TV code".' -ForegroundColor Cyan
 Write-Host 'Typing a password on a television is the part nobody plans for.'
+Write-Host ''
+Write-Host 'To get out of it: hold Start + Back for a second.' -ForegroundColor Cyan
+Write-Host 'That opens Quick Settings over whatever is on screen, and its Power page'
+Write-Host 'goes back to the console. Steam''s overlay does not hook this kind of app,'
+Write-Host 'so the guide button will not do it. R3 opens VacuumTube''s own settings.'

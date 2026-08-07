@@ -167,6 +167,31 @@ if ($Services -and $Phase -ne 'machine') {
     if (-not $edge) {
         Write-Warning 'Microsoft Edge was not found, so the streaming services were skipped.'
     } else {
+        # A fresh Edge profile on a machine whose Windows account is a Microsoft
+        # account opens a full screen "we are now syncing your browsing data"
+        # dialog on first launch. It has one button and it needs a click, which
+        # on a television with a controller is where the evening ends. There is
+        # no command line switch for it; policy is the documented way.
+        #
+        # HKCU on purpose, not HKLM: this is the console account's Edge, and the
+        # administrator account keeps a normal browser with sign-in and sync
+        # working. A machine-wide policy would take those away from the account
+        # you use to fix things.
+        $edgePolicy = 'HKCU:\SOFTWARE\Policies\Microsoft\Edge'
+        if (-not (Test-Path $edgePolicy)) { New-Item -Path $edgePolicy -Force | Out-Null }
+        $policies = [ordered]@{
+            BrowserSignin              = 0   # no sign-in, which is what draws the sync dialog
+            SyncDisabled               = 1
+            HideFirstRunExperience     = 1   # no welcome tour
+            AutoImportAtFirstRun       = 0   # no "we imported your favourites" panel
+            ShowRecommendationsEnabled = 0   # no suggestion popups over a film
+        }
+        foreach ($name in $policies.Keys) {
+            New-ItemProperty -Path $edgePolicy -Name $name -Value $policies[$name] -PropertyType DWord -Force | Out-Null
+        }
+        Write-Host ''
+        Write-Host "Edge, for $env:USERNAME only: sign-in, sync, the welcome tour and suggestions off." -ForegroundColor Cyan
+
         foreach ($key in $Services) {
             $site = $sites[$key]
             Write-Host ''
@@ -194,9 +219,15 @@ if ($Services -and $Phase -ne 'machine') {
             #                             small from three metres. Netflix's own
             #                             TV interface is far larger than its
             #                             web one; this closes some of the gap.
+            #   --hide-scrollbars         the one thing that makes a web page
+            #                             read as a web page from the sofa. No
+            #                             television interface has a scrollbar,
+            #                             and it is visible in every screenshot
+            #                             until it is turned off.
             $arguments = "--app=`"$($site.Url)`" --start-fullscreen" +
                          " --no-first-run --no-default-browser-check" +
                          " --disable-session-crashed-bubble --noerrdialogs" +
+                         " --hide-scrollbars" +
                          " --force-device-scale-factor=$Scale"
             if ($canShortcut) { & $shortcut -Name $site.Label -Exe $edge -Arguments $arguments -Glyph 'E714' -NoApply }
             else { Write-Host "  $edge $arguments" }

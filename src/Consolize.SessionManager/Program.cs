@@ -58,6 +58,14 @@ internal sealed record AppConfig
     /// <summary>Upper bound: the splash also closes as soon as the frontend
     /// puts a window on screen.</summary>
     public int SplashSeconds { get; init; } = 12;
+
+    /// <summary>How long Start and Back have to be held together, anywhere, to
+    /// open Quick Settings. This is the only way out of an application that is
+    /// not the frontend: Steam's overlay does not hook Electron or a browser
+    /// window, so the guide button does nothing inside YouTube, Kodi or a
+    /// streaming site, and there is no keyboard on a sofa. Set to 0 to switch
+    /// the chord off if a game you play needs both buttons held.</summary>
+    public double PanelChordSeconds { get; init; } = 1.0;
 }
 
 internal static class Program
@@ -295,6 +303,71 @@ internal static class Program
         new[] { "NONE", "NENHUM", "AUCUN", "KEINE", "NINGUNO", "NESSUNO", "GEEN", "BRAK" }
             .Contains(line, StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// The way out of anything that is not the frontend.
+    ///
+    /// Steam's overlay is what normally gives a non-Steam entry a way back, and
+    /// it does not hook Electron applications or a browser window. So inside
+    /// VacuumTube, Kodi or a streaming site the guide button does nothing, the
+    /// window has no decorations to close, and on a sofa there is no keyboard.
+    /// Before this, the only way out of YouTube was the power button.
+    ///
+    /// This process is the shell and is always running, so it is the only thing
+    /// that can watch for a chord no matter what has the foreground. Start and
+    /// Back held together for a second opens Quick Settings, which already has
+    /// "back to console", "desktop mode" and "restart frontend" on its Power
+    /// page. One escape hatch, every application.
+    ///
+    /// It only reads XInput, it never injects or swallows input, so a game
+    /// receives the same buttons it always did. The hold requirement is what
+    /// keeps it from firing during play, and it can be switched off.
+    /// </summary>
+    private static void PanelChordLoop(CancellationToken ct)
+    {
+        var required = Interop.PadButton.Start | Interop.PadButton.Back;
+        var holdFor = TimeSpan.FromSeconds(Math.Max(0, _config.PanelChordSeconds));
+        if (holdFor <= TimeSpan.Zero)
+        {
+            Log("panel chord disabled by config");
+            return;
+        }
+
+        Log($"panel chord armed: hold Start + Back for {holdFor.TotalSeconds:0.#}s");
+        DateTime? heldSince = null;
+        var fired = false;
+
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                var held = Interop.Gamepad.ReadHeldStatic();
+                if ((held & required) == required)
+                {
+                    heldSince ??= DateTime.UtcNow;
+                    if (!fired && DateTime.UtcNow - heldSince.Value >= holdFor)
+                    {
+                        fired = true;
+                        Log("panel chord: Start + Back held, opening quick settings");
+                        OpenPanel();
+                    }
+                }
+                else
+                {
+                    // Rearmed only once both buttons are released, so holding
+                    // them longer does not open a second panel.
+                    heldSince = null;
+                    fired = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"panel chord loop error, continuing: {ex.Message}");
+            }
+
+            SleepCancellable(ct, TimeSpan.FromMilliseconds(120));
+        }
+    }
+
     private static void OpenPanel()
     {
         try
@@ -331,6 +404,7 @@ internal static class Program
 
         _ = Task.Run(() => PipeServerLoop(Cts.Token));
         _ = Task.Run(() => EmptyScreenLoop(Cts.Token));
+        _ = Task.Run(() => PanelChordLoop(Cts.Token));
         WatchdogLoop(Cts.Token);
         Log("session manager exiting");
     }
