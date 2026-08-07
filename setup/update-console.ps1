@@ -170,7 +170,11 @@ try {
     $form.FormBorderStyle = 'None'
     $form.StartPosition = 'CenterScreen'
     $form.Size = New-Object System.Drawing.Size(760, 420)
-    $form.BackColor = [System.Drawing.Color]::FromArgb(14, 16, 22)
+    # Pure black, not the near-black the rest of the panel uses, and that is the
+    # whole reason: splash.png is a white logo on a solid black rectangle, so
+    # against 14,16,22 it showed as a visibly lighter box around the logo.
+    # Matching the image's own background makes the rectangle disappear.
+    $form.BackColor = [System.Drawing.Color]::Black
     $form.ForeColor = [System.Drawing.Color]::FromArgb(232, 238, 248)
     $form.TopMost = $true
 
@@ -179,6 +183,7 @@ try {
         $logo = New-Object System.Windows.Forms.PictureBox
         $logo.Image = [System.Drawing.Image]::FromFile($splash)
         $logo.SizeMode = 'Zoom'
+        $logo.BackColor = [System.Drawing.Color]::Black
         $logo.Size = New-Object System.Drawing.Size(720, 150)
         $logo.Location = New-Object System.Drawing.Point(20, 20)
         $form.Controls.Add($logo)

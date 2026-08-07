@@ -117,6 +117,61 @@ function Get-SiteIcon {
     return $null
 }
 
+# Steam's shortcut icon field is a Windows icon path, and a .png put there is
+# quietly not drawn: the entry simply has no symbol, which is what a library
+# full of freshly fetched logos looked like. Sites publish PNG, so it has to be
+# wrapped.
+#
+# The container is simple enough to write directly: a 6 byte header, one 16 byte
+# directory entry, then the image. Windows Vista and later read a PNG stored
+# inside an .ico as-is, so the pixels are copied rather than re-encoded, and 256
+# pixel images record their size as 0 because the field is a single byte.
+function ConvertTo-Icon {
+    param([string]$ImagePath, [string]$OutFile)
+
+    Add-Type -AssemblyName System.Drawing
+    $source = [System.Drawing.Image]::FromFile($ImagePath)
+    try {
+        $side = [Math]::Min(256, [Math]::Max($source.Width, $source.Height))
+        $square = New-Object System.Drawing.Bitmap($side, $side, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        $graphics = [System.Drawing.Graphics]::FromImage($square)
+        try {
+            $graphics.InterpolationMode = 'HighQualityBicubic'
+            # Not $scale: that is the script's [double]$Scale parameter with a
+            # different capital, and PowerShell would have quietly overwritten
+            # the zoom factor for every streaming window with a ratio.
+            $ratio = [Math]::Min($side / $source.Width, $side / $source.Height)
+            $width = [single]($source.Width * $ratio)
+            $height = [single]($source.Height * $ratio)
+            $graphics.DrawImage($source, [single](($side - $width) / 2), [single](($side - $height) / 2), $width, $height)
+        } finally { $graphics.Dispose() }
+
+        $buffer = New-Object System.IO.MemoryStream
+        $square.Save($buffer, [System.Drawing.Imaging.ImageFormat]::Png)
+        $square.Dispose()
+        $png = $buffer.ToArray()
+        $buffer.Dispose()
+
+        $stream = [IO.File]::Open($OutFile, 'Create')
+        $writer = New-Object System.IO.BinaryWriter($stream)
+        try {
+            $writer.Write([uint16]0)            # reserved
+            $writer.Write([uint16]1)            # type: icon
+            $writer.Write([uint16]1)            # one image
+            $writer.Write([byte]($side % 256))  # 256 is recorded as 0
+            $writer.Write([byte]($side % 256))
+            $writer.Write([byte]0)              # palette
+            $writer.Write([byte]0)              # reserved
+            $writer.Write([uint16]1)            # colour planes
+            $writer.Write([uint16]32)           # bits per pixel
+            $writer.Write([uint32]$png.Length)
+            $writer.Write([uint32]22)           # the image starts after this header
+            $writer.Write($png)
+        } finally { $writer.Dispose(); $stream.Dispose() }
+    } finally { $source.Dispose() }
+    return $OutFile
+}
+
 function Resolve-Exe {
     param([string[]]$Candidates)
     foreach ($candidate in $Candidates) {
@@ -235,6 +290,11 @@ if ($Services -and $Phase -ne 'machine') {
             HideFirstRunExperience     = 1   # no welcome tour
             AutoImportAtFirstRun       = 0   # no "we imported your favourites" panel
             ShowRecommendationsEnabled = 0   # no suggestion popups over a film
+            # Startup boost keeps an Edge process alive after every window
+            # closes. Harmless on a desktop, and on a console it is one more
+            # thing running behind a game for no benefit.
+            StartupBoostEnabled        = 0
+            BackgroundModeEnabled      = 0
         }
         foreach ($name in $policies.Keys) {
             New-ItemProperty -Path $edgePolicy -Name $name -Value $policies[$name] -PropertyType DWord -Force | Out-Null
@@ -248,10 +308,23 @@ if ($Services -and $Phase -ne 'machine') {
             Write-Host ">> $($site.Label)..." -ForegroundColor Cyan
             # --app gives a window with no browser furniture, which is the whole
             # point on a television: no tabs, no address bar, no back button
-            # sitting over the film. Deliberately use the console user's normal
-            # Edge profile: provisioning is elevated under another account,
-            # and pinning --user-data-dir here would put logins in the wrong
-            # profile or create state the console user cannot update.
+            # sitting over the film.
+            #
+            # --user-data-dir is back, and it is not optional. Chromium is one
+            # instance per profile: launch a second one against a profile that
+            # is already open and it hands the request over and exits, which is
+            # what Steam sees as the entry closing the moment it opens. Measured
+            # rather than argued: the second process exits with code 0 in under
+            # five seconds. Edge's startup boost keeps a background process
+            # alive, so on the shared profile that happens every single time.
+            #
+            # This used to point at the console user's normal profile because
+            # provisioning ran elevated under another account and would have
+            # created state that account could not update. That reason is gone:
+            # the services are set up in the user phase now, as the console
+            # account itself, so the profile is created by and belongs to the
+            # account that will use it. The cost is that each service keeps its
+            # own sign-in, which on a console is closer to right anyway.
             #
             # The rest are the traps, and every one of them is something that
             # would only show up with a controller in hand and no keyboard:
@@ -274,11 +347,27 @@ if ($Services -and $Phase -ne 'machine') {
             #                             television interface has a scrollbar,
             #                             and it is visible in every screenshot
             #                             until it is turned off.
-            $arguments = "--app=`"$($site.Url)`" --start-fullscreen" +
+            # No quotes around the URL or the profile path, deliberately.
+            # These arguments are stored in Steam's LaunchOptions and Steam
+            # parses that string itself before handing it to the process, so
+            # embedded quotes are one more parser between the value written
+            # here and the value Edge receives. A URL has no spaces and neither
+            # does the profile path, so the quotes bought nothing and could only
+            # cost. Reported as Netflix opening and closing immediately, which
+            # is what Edge does when --app arrives malformed.
+            #
+            # $Scale is formatted invariantly: on a machine set to a language
+            # that writes decimals with a comma, "1,5" is not a number Chromium
+            # accepts.
+            $scaleText = $Scale.ToString([Globalization.CultureInfo]::InvariantCulture)
+            $profileDir = Join-Path $env:LOCALAPPDATA "Consolize\web\$key"
+            New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
+            $arguments = "--app=$($site.Url) --start-fullscreen" +
+                         " --user-data-dir=$profileDir" +
                          " --no-first-run --no-default-browser-check" +
                          " --disable-session-crashed-bubble --noerrdialogs" +
                          " --hide-scrollbars" +
-                         " --force-device-scale-factor=$Scale"
+                         " --force-device-scale-factor=$scaleText"
             $iconDir = Join-Path $env:LOCALAPPDATA 'Consolize\icons'
             New-Item -ItemType Directory -Force -Path $iconDir | Out-Null
             $icon = Get-SiteIcon -Url $site.Url -OutFile (Join-Path $iconDir "$key.png")
@@ -287,7 +376,14 @@ if ($Services -and $Phase -ne 'machine') {
 
             if ($canShortcut) {
                 $splat = @{ Name = $site.Label; Exe = $edge; Arguments = $arguments; Glyph = 'E714'; NoApply = $true }
-                if ($icon) { $splat.Icon = $icon; $splat.Artwork = $icon }
+                if ($icon) {
+                    # Artwork stays the original image, which the cover art
+                    # composer reads directly. Only Steam's icon field needs
+                    # the .ico wrapper.
+                    $splat.Artwork = $icon
+                    try { $splat.Icon = ConvertTo-Icon -ImagePath $icon -OutFile (Join-Path $iconDir "$key.ico") }
+                    catch { Write-Warning "  could not build an .ico from it: $($_.Exception.Message)" }
+                }
                 & $shortcut @splat
             }
             else { Write-Host "  $edge $arguments" }
