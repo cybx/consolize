@@ -368,6 +368,77 @@ internal static class Program
         }
     }
 
+    /// <summary>
+    /// The tray icon, in a colour that can be seen.
+    ///
+    /// The logo is a white shape on transparency, which is right on the dark
+    /// taskbar and completely invisible on the light one, where it is white on
+    /// white. Reported as "the icon in the taskbar is invisible", and it was.
+    ///
+    /// Windows says which one is in use, so the shape is recoloured to a dark
+    /// tone when the taskbar is light. Read once, when desktop mode starts,
+    /// which is when this icon is created; switching theme mid-session and
+    /// wanting the tray to follow is not worth watching for.
+    /// </summary>
+    private static Icon LoadTrayIcon()
+    {
+        Icon icon;
+        try
+        {
+            // The .ico beside the binary carries every size; extracting from
+            // the exe gives whichever one the resource happens to expose.
+            var beside = Path.Combine(
+                Path.GetDirectoryName(Environment.ProcessPath!) ?? ".", "consolize.ico");
+            icon = File.Exists(beside)
+                ? new Icon(beside, SystemInformation.SmallIconSize)
+                : Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? SystemIcons.Application;
+        }
+        catch { return SystemIcons.Application; }
+
+        if (TaskbarIsLight())
+        {
+            try { icon = Recolour(icon, Color.FromArgb(32, 36, 44)); }
+            catch (Exception ex) { Log($"could not recolour the tray icon: {ex.Message}"); }
+        }
+        return icon;
+    }
+
+    private static bool TaskbarIsLight()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(
+                @"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            // SystemUsesLightTheme is the one that drives the taskbar and tray.
+            // AppsUseLightTheme is about application windows and says nothing
+            // about the strip this icon sits on.
+            return key?.GetValue("SystemUsesLightTheme") is int value && value == 1;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Repaints the opaque part of an icon, keeping its alpha, so the
+    /// silhouette survives and only the colour changes.</summary>
+    private static Icon Recolour(Icon source, Color target)
+    {
+        using var original = source.ToBitmap();
+        using var painted = new Bitmap(original.Width, original.Height,
+            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+
+        for (var y = 0; y < original.Height; y++)
+        {
+            for (var x = 0; x < original.Width; x++)
+            {
+                var pixel = original.GetPixel(x, y);
+                painted.SetPixel(x, y, Color.FromArgb(pixel.A, target.R, target.G, target.B));
+            }
+        }
+
+        // GetHicon hands over a handle the tray keeps for the life of the
+        // process, which is exactly as long as this icon is needed.
+        return Icon.FromHandle(painted.GetHicon());
+    }
+
     private static void OpenPanel()
     {
         try
@@ -989,9 +1060,7 @@ internal static class Program
                 menu.Items.Add(new ToolStripSeparator());
                 menu.Items.Add("Sleep", null, (_, _) => SetSuspendState(false, false, false));
 
-                Icon icon;
-                try { icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? SystemIcons.Application; }
-                catch { icon = SystemIcons.Application; }
+                var icon = LoadTrayIcon();
 
                 _trayIcon = new NotifyIcon
                 {
