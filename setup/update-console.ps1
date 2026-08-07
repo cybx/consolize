@@ -85,6 +85,46 @@ if (Get-Command winget -ErrorAction SilentlyContinue) {
     Write-Host '  winget not available, skipping'
 }
 
+# --- reapply what the new scripts know how to do ------------------------------
+# Pulling new scripts is not the same as applying them. A fix to how YouTube
+# opens, or to Edge's first-run dialog, lives in a script that only ever runs
+# during setup, so a machine installed last week would take the new file and
+# keep the old behaviour forever. Everything below is safe to re-run: each
+# script decides for itself whether there is anything to do.
+#
+# This runs as the console account, because it is launched from that account's
+# Steam library, which is what makes the per-user parts land in the right
+# profile. Run from an administrator session instead and the per-user steps
+# would configure that account rather than the console one.
+$answersPath = Join-Path $env:ProgramData 'Consolize\answers.json'
+$answers = $null
+if (Test-Path $answersPath) {
+    try { $answers = Get-Content $answersPath -Raw | ConvertFrom-Json } catch { }
+}
+
+if ($answers -and $answers.YouTube) {
+    Write-Host ''
+    Write-Host '==> YouTube settings for this account...' -ForegroundColor Cyan
+    $youtube = Join-Path $PSScriptRoot 'install-youtube.ps1'
+    if (Test-Path $youtube) {
+        try { & $youtube -Phase user -NoShortcut } catch { Write-Warning "  $($_.Exception.Message)" }
+    }
+}
+
+if ($answers -and (@($answers.HtpcApps).Count -gt 0 -or @($answers.HtpcServices).Count -gt 0)) {
+    Write-Host ''
+    Write-Host '==> Media centre settings for this account...' -ForegroundColor Cyan
+    $htpc = Join-Path $PSScriptRoot 'install-htpc.ps1'
+    if (Test-Path $htpc) {
+        # -DeferApply: the shortcuts are written once below rather than once per
+        # script, so Steam is closed a single time.
+        try {
+            & $htpc -Apps @($answers.HtpcApps) -Services @($answers.HtpcServices) `
+                -Phase user -DeferApply
+        } catch { Write-Warning "  $($_.Exception.Message)" }
+    }
+}
+
 # --- the library entries ------------------------------------------------------
 # Reapplied on every update, not only at setup. Otherwise a machine whose
 # shortcuts were written by an older version has no way back: the entry that

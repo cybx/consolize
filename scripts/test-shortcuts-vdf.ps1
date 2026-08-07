@@ -366,8 +366,14 @@ try {
     & $script -ConsolizeExe $exe -Force | Out-Null
     $entry = @((Parse-Vdf ([IO.File]::ReadAllBytes($vdf))) | Where-Object { $_.AppName -eq 'Netflix' })
 
+    # By file name, not by full path. On a machine whose TEMP has an 8.3 short
+    # name, as the CI runner's does (RUNNER~1 against runneradmin), the same
+    # file arrives spelled two ways and a string comparison rejects the correct
+    # answer. This passed locally for exactly that reason and failed on CI.
     Check 'the entry is there' ($entry.Count -eq 1) 'not found'
-    Check 'its icon is its own, not the launcher' ($entry[0].icon -eq $ownIcon) "got $($entry[0].icon)"
+    Check 'its icon is its own, not the launcher' (
+        [IO.Path]::GetFileName($entry[0].icon) -eq [IO.Path]::GetFileName($ownIcon)
+    ) "got $($entry[0].icon)"
     # Not a "*consolize*" match: the whole test tree lives under a directory
     # with that word in it, so the pattern was true of the correct answer too.
     Check 'and not our own binary or icon' (
@@ -380,7 +386,9 @@ try {
     & $script -ConsolizeExe $exe -Force -Remove *> $null
     & $script -ConsolizeExe $exe -Force -WarningAction SilentlyContinue | Out-Null
     $entry = @((Parse-Vdf ([IO.File]::ReadAllBytes($vdf))) | Where-Object { $_.AppName -eq 'Netflix' })
-    Check 'a missing icon file falls back to the target' ($entry[0].icon -eq $browser) "got $($entry[0].icon)"
+    Check 'a missing icon file falls back to the target' (
+        [IO.Path]::GetFileName($entry[0].icon) -eq [IO.Path]::GetFileName($browser)
+    ) "got $($entry[0].icon)"
 } finally {
     Remove-Item $extrasFile -Force -ErrorAction SilentlyContinue
 }
