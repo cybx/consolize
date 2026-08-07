@@ -312,7 +312,11 @@ foreach ($key in $selected) {
             # release, and the reasoning is long enough to want its own file.
             $youtube = Join-Path $PSScriptRoot 'install-youtube.ps1'
             if (Test-Path $youtube) {
-                try { & $youtube } catch { Write-Warning "YouTube: $($_.Exception.Message)" }
+                # Machine-wide half only. VacuumTube keeps fullscreen and window
+                # decorations in the running account's own profile, so presetting
+                # them from the elevated phase would configure the administrator's
+                # copy and leave the console account with a windowed YouTube.
+                try { & $youtube -Phase machine } catch { Write-Warning "YouTube: $($_.Exception.Message)" }
             } else {
                 Write-Warning 'install-youtube.ps1 is not here, skipping.'
             }

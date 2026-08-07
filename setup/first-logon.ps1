@@ -241,6 +241,18 @@ if ($answers -and (@($answers.HtpcApps).Count -gt 0 -or @($answers.HtpcServices)
     }
 }
 
+# YouTube is split for the same reason: VacuumTube was installed machine-wide in
+# phase 1, but it keeps fullscreen and window decorations in the running
+# account's profile, so presetting them there would have configured the
+# administrator's copy and left this account with a windowed YouTube.
+if ($answers -and $answers.YouTube) {
+    $youtube = Join-Path $here 'install-youtube.ps1'
+    if (Test-Path $youtube) {
+        Write-Host '==> Finishing YouTube for this account...' -ForegroundColor Cyan
+        try { & $youtube -Phase user } catch { Write-Warning "Could not finish YouTube: $($_.Exception.Message)" }
+    }
+}
+
 # --- this account's own startup ----------------------------------------------
 # Phase 1 runs as the administrator, where HKCU is theirs, so it deliberately
 # skips per-user entries. This is the session where the console account's own

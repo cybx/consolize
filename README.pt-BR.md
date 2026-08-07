@@ -319,6 +319,24 @@ O `consolize panel --diag` imprime o que ele consegue enxergar (dispositivos de
 áudio, rádio Bluetooth, disponibilidade de XInput) sem abrir janela, que é o jeito
 rápido de conferir uma máquina.
 
+### A saída de qualquer coisa: **segure Start + Back**
+
+O overlay da Steam é o que normalmente dá volta numa entrada não-Steam, e ele não
+engancha em aplicativo Electron nem em janela de navegador. Então dentro do
+YouTube, do Kodi ou de um site de streaming o botão guia não faz nada, uma janela
+sem decoração não tem o que fechar, e num sofá não existe teclado. Antes disso, a
+única saída era o botão de força.
+
+O session manager é o shell e está sempre rodando, então é a única coisa capaz de
+vigiar um comando independente do que está em primeiro plano. **Start e Back
+segurados juntos por um segundo** abrem o Quick Settings por cima do que estiver
+na tela, e a página Power dele volta para o console.
+
+Ele só **lê** o XInput; nunca injeta nem engole entrada, então o jogo recebe
+exatamente os botões que sempre recebeu. Segurar é o que impede o disparo no meio
+da partida, e o `PanelChordSeconds` no `config.json` muda o tempo ou, em `0`,
+desliga.
+
 O que ele **não** é: uma tarefa agendada abrindo um VBS que abre um batch, nem
 uma sequência de sleeps de 20 segundos torcendo para o frontend já estar de pé. O
 único valor de registro que ele escreve é o `Winlogon\Shell` por usuário citado

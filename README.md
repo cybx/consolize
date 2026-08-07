@@ -302,6 +302,24 @@ or an HDMI-CEC adapter.
 XInput availability) without opening a window, which is the quick way to check a
 machine.
 
+### The way out of anything: **hold Start + Back**
+
+Steam's overlay is what normally gives a non-Steam entry a way back, and it does
+not hook Electron applications or a browser window. So inside YouTube, Kodi or a
+streaming site the guide button does nothing, a window with no decorations has
+nothing to close, and a sofa has no keyboard. Before this the only way out was
+the power button.
+
+The session manager is the shell and is always running, so it is the only thing
+that can watch for a chord no matter what holds the foreground. **Start and Back
+held together for a second** opens Quick Settings over whatever is on screen,
+and its Power page goes back to the console.
+
+It only reads XInput; it never injects or swallows input, so a game receives
+exactly the buttons it always did. The hold is what stops it firing mid-play,
+and `PanelChordSeconds` in `config.json` changes the delay or, at `0`, switches
+it off.
+
 What it is not: a scheduled task launching a VBS that launches a batch, or a
 chain of fixed 20-second sleeps hoping the frontend is up by then. The one
 registry value it does write is the per-user `Winlogon\Shell` above, which is

@@ -23,6 +23,11 @@ elevated would install into the administrator's profile, invisible to gamer.
   .\install-youtube.ps1 -NoShortcut     # install only
 #>
 param(
+    # Split the same way the media centre is, and for the same reason. The
+    # download and the machine-wide install belong in the elevated phase; the
+    # settings and the library entry belong to the console account, because its
+    # configuration lives in that account's profile. Run whole with 'all'.
+    [ValidateSet('all', 'machine', 'user')] [string]$Phase = 'all',
     [switch]$NoShortcut,
     # Pin a version instead of taking the newest, for a machine that should not
     # change under its owner.
@@ -89,6 +94,12 @@ if ($installed -and $installedVersion -eq $release.tag_name) {
     }
     Set-Content $versionFile $release.tag_name -Encoding ASCII
     Write-Host "  installed: $installed" -ForegroundColor Green
+}
+
+if ($Phase -eq 'machine') {
+    Write-Host '  installed machine-wide; its settings and library entry are finished'
+    Write-Host '  inside the console account, where its configuration actually lives.'
+    return
 }
 
 # --- make it open like an appliance, not like a program ---------------------

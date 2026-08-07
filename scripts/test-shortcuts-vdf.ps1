@@ -352,6 +352,39 @@ try {
     Remove-Item $extrasFile, $legacyExtras -Force -ErrorAction SilentlyContinue
 }
 
+Write-Host "`n15. an added app can carry its own icon, not the launcher's"
+# Six streaming services all launch msedge.exe. Without this the library shows
+# six identical Edge logos, which was the single thing making the shelf read as
+# a list of browser windows rather than a set of apps.
+$browser = Join-Path $root 'browser.exe'; Set-Content $browser 'stub'
+$ownIcon = Join-Path $root 'service-icon.png'
+$blank = New-Object System.Drawing.Bitmap(64, 64)
+$blank.Save($ownIcon, [System.Drawing.Imaging.ImageFormat]::Png); $blank.Dispose()
+try {
+    & $addApp -Name 'Netflix' -Exe $browser -Arguments '--app=x' -Icon $ownIcon -NoApply | Out-Null
+    & $script -ConsolizeExe $exe -Force -Remove *> $null
+    & $script -ConsolizeExe $exe -Force | Out-Null
+    $entry = @((Parse-Vdf ([IO.File]::ReadAllBytes($vdf))) | Where-Object { $_.AppName -eq 'Netflix' })
+
+    Check 'the entry is there' ($entry.Count -eq 1) 'not found'
+    Check 'its icon is its own, not the launcher' ($entry[0].icon -eq $ownIcon) "got $($entry[0].icon)"
+    # Not a "*consolize*" match: the whole test tree lives under a directory
+    # with that word in it, so the pattern was true of the correct answer too.
+    Check 'and not our own binary or icon' (
+        [IO.Path]::GetFileName($entry[0].icon) -notin @('consolize.exe', 'consolize.ico')
+    ) "got $($entry[0].icon)"
+
+    # An icon deleted since must not be written, or Steam draws a blank where a
+    # logo should be.
+    Remove-Item $ownIcon -Force
+    & $script -ConsolizeExe $exe -Force -Remove *> $null
+    & $script -ConsolizeExe $exe -Force -WarningAction SilentlyContinue | Out-Null
+    $entry = @((Parse-Vdf ([IO.File]::ReadAllBytes($vdf))) | Where-Object { $_.AppName -eq 'Netflix' })
+    Check 'a missing icon file falls back to the target' ($entry[0].icon -eq $browser) "got $($entry[0].icon)"
+} finally {
+    Remove-Item $extrasFile -Force -ErrorAction SilentlyContinue
+}
+
 Write-Host ''
 Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
 if ($fail) { Write-Host "$fail check(s) failed" -ForegroundColor Red; exit 1 }

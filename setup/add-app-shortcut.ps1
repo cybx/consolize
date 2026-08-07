@@ -32,8 +32,7 @@ param(
     # The small icon Steam shows beside the entry. Without it the icon is the
     # target executable's own, which is right for a real application and wrong
     # for anything launched through a browser: six streaming services all
-    # pointing at msedge.exe show six identical Edge logos. Defaults to
-    # -Artwork when that is given.
+    # pointing at msedge.exe show six identical Edge logos.
     [string]$Icon,
     [switch]$Delete,
     [switch]$List,
@@ -112,7 +111,9 @@ if ($Artwork) {
 $entry = [ordered]@{ name = $Name; exe = $Exe; args = $Arguments }
 if ($Glyph) { $entry.glyph = $Glyph.ToUpper() }
 if ($Artwork) { $entry.artwork = $Artwork }
-if (-not $Icon -and $Artwork) { $Icon = $Artwork }
+# Deliberately not defaulted from -Artwork. Cover art is a 600x900 portrait and
+# makes a poor 32 pixel icon; they are different pictures for different places.
+# Anything that has both, like the streaming services, passes both.
 if ($Icon) {
     $Icon = [IO.Path]::GetFullPath($Icon)
     if (-not (Test-Path $Icon -PathType Leaf)) { throw "$Icon is not there." }
