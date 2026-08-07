@@ -119,6 +119,17 @@ $wanted = [ordered]@{
 }
 
 try {
+    # Electron writes this file out when it closes, from what it holds in
+    # memory, so anything set underneath a running VacuumTube is discarded at
+    # exit. Exactly the trap Steam sets with shortcuts.vdf, and the reason the
+    # window kept opening at desktop size after the setting had been written.
+    $running = Get-Process VacuumTube -ErrorAction SilentlyContinue
+    if ($running) {
+        Write-Host '  closing VacuumTube first, it rewrites its settings when it exits...'
+        $running | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 3
+    }
+
     New-Item -ItemType Directory -Force -Path $configDir | Out-Null
     $config = [ordered]@{}
     if (Test-Path $configFile) {
@@ -145,7 +156,26 @@ $shortcut = Join-Path $PSScriptRoot 'add-app-shortcut.ps1'
 if (-not (Test-Path $shortcut)) { Write-Warning "add-app-shortcut.ps1 is not here, skipping the Steam entry."; return }
 
 Write-Host ''
-& $shortcut -Name 'YouTube' -Exe $installed -Glyph 'E714'
+# Steam's icon field is a Windows icon path, and it draws nothing for an entry
+# whose icon it cannot read. Handing it the .exe leaves the choice to Steam and
+# it came out blank, so the icon is extracted into a real .ico beside the
+# binary and pointed at directly. Same fix the streaming entries needed.
+$iconArgs = @{}
+try {
+    Add-Type -AssemblyName System.Drawing
+    $extracted = [System.Drawing.Icon]::ExtractAssociatedIcon($installed)
+    if ($extracted) {
+        $iconFile = Join-Path (Join-Path $env:LOCALAPPDATA 'Consolize\icons') 'youtube.ico'
+        New-Item -ItemType Directory -Force -Path (Split-Path $iconFile) | Out-Null
+        $stream = [IO.File]::Open($iconFile, 'Create')
+        try { $extracted.Save($stream) } finally { $stream.Dispose() }
+        $extracted.Dispose()
+        $iconArgs.Icon = $iconFile
+        Write-Host "  icon: $iconFile"
+    }
+} catch { Write-Warning "  could not extract its icon: $($_.Exception.Message)" }
+
+& $shortcut -Name 'YouTube' -Exe $installed -Glyph 'E714' @iconArgs
 
 Write-Host ''
 Write-Host 'Sign in from the couch: open YouTube, go to Settings, and use "Link with TV code".' -ForegroundColor Cyan

@@ -29,7 +29,12 @@ function Test-Admin {
 
 if (-not (Test-Admin) -and -not $NoElevate) {
     Write-Host 'Asking for administrator rights...'
-    $arguments = @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"")
+    # No -NoExit. It was here so a failure stayed readable, but it also kept the
+    # window open after a successful run that says "closing in 15 seconds" and
+    # then does not close, which has to be dismissed by hand from a sofa with no
+    # keyboard. Every path through this script already pauses before it returns,
+    # so the message is readable without pinning the window open forever.
+    $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"")
     if ($IncludeWindows) { $arguments += '-IncludeWindows' }
     if ($SelfUrl -ne 'https://get-consolize.cybx.dev') { $arguments += @('-SelfUrl', "`"$SelfUrl`"") }
     try {
