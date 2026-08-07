@@ -67,6 +67,56 @@ $sites = [ordered]@{
     crunchyroll = @{ Label = 'Crunchyroll'; Url = 'https://www.crunchyroll.com' }
 }
 
+# The icon a browser would use for a bookmark, fetched from the service's own
+# site on this machine at install time. Nothing is shipped in this repository:
+# these are other people's trademarks, and the point is only to tell six
+# entries apart, which is exactly what a browser does with a favicon.
+#
+# Best available wins. Sites advertise several sizes and the markup varies, so
+# this asks the page first, then the two conventional paths. A browser user
+# agent because some of them answer 403 to anything else.
+function Get-SiteIcon {
+    param([string]$Url, [string]$OutFile)
+
+    $uri = [Uri]$Url
+    $base = "$($uri.Scheme)://$($uri.Host)"
+    $agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36'
+    $candidates = New-Object System.Collections.Generic.List[string]
+
+    try {
+        $html = (Invoke-WebRequest $Url -UseBasicParsing -TimeoutSec 15 -Headers @{ 'User-Agent' = $agent }).Content
+        $links = [regex]::Matches($html, '<link[^>]+rel="[^"]*icon[^"]*"[^>]*>')
+        $found = foreach ($link in $links) {
+            $href = [regex]::Match($link.Value, 'href="([^"]+)"').Groups[1].Value
+            if (-not $href -or $href -like '*.svg') { continue }   # Steam does not read SVG
+            $size = [regex]::Match($link.Value, 'sizes="(\d+)x\d+"').Groups[1].Value
+            [pscustomobject]@{
+                Url = if ($href -match '^https?://') { $href }
+                      elseif ($href.StartsWith('//')) { "$($uri.Scheme):$href" }
+                      else { "$base/$($href.TrimStart('/'))" }
+                Size = if ($size) { [int]$size } else { 0 }
+            }
+        }
+        foreach ($item in ($found | Sort-Object Size -Descending)) { $candidates.Add($item.Url) }
+    } catch { }
+
+    $candidates.Add("$base/apple-touch-icon.png")
+    $candidates.Add("$base/favicon.ico")
+
+    foreach ($candidate in $candidates) {
+        try {
+            $extension = if ($candidate -match '\.ico(\?|$)') { '.ico' } else { '.png' }
+            $target = [IO.Path]::ChangeExtension($OutFile, $extension)
+            Invoke-WebRequest $candidate -OutFile $target -UseBasicParsing -TimeoutSec 15 `
+                -Headers @{ 'User-Agent' = $agent } -ErrorAction Stop
+            # A 404 page saved as a file is not an icon
+            if ((Get-Item $target).Length -gt 500) { return $target }
+            Remove-Item $target -Force -ErrorAction SilentlyContinue
+        } catch { }
+    }
+    return $null
+}
+
 function Resolve-Exe {
     param([string[]]$Candidates)
     foreach ($candidate in $Candidates) {
@@ -229,7 +279,17 @@ if ($Services -and $Phase -ne 'machine') {
                          " --disable-session-crashed-bubble --noerrdialogs" +
                          " --hide-scrollbars" +
                          " --force-device-scale-factor=$Scale"
-            if ($canShortcut) { & $shortcut -Name $site.Label -Exe $edge -Arguments $arguments -Glyph 'E714' -NoApply }
+            $iconDir = Join-Path $env:LOCALAPPDATA 'Consolize\icons'
+            New-Item -ItemType Directory -Force -Path $iconDir | Out-Null
+            $icon = Get-SiteIcon -Url $site.Url -OutFile (Join-Path $iconDir "$key.png")
+            if ($icon) { Write-Host "  icon: $(Split-Path $icon -Leaf)" }
+            else { Write-Host '  no icon published by the site, using the generated one' }
+
+            if ($canShortcut) {
+                $splat = @{ Name = $site.Label; Exe = $edge; Arguments = $arguments; Glyph = 'E714'; NoApply = $true }
+                if ($icon) { $splat.Icon = $icon; $splat.Artwork = $icon }
+                & $shortcut @splat
+            }
             else { Write-Host "  $edge $arguments" }
         }
     }

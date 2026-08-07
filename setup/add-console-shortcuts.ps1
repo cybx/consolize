@@ -298,6 +298,13 @@ if (Test-Path $extrasFile) {
                 Glyph = if ($extra.glyph) { [char][Convert]::ToInt32($extra.glyph, 16) } else { [char]0xECAA }
                 Accent = $rgb
                 OwnIcon = $true
+                # An icon of its own beats the target's. Six streaming services
+                # launched through Edge otherwise show six identical Edge logos,
+                # which is the single thing that makes the library look like a
+                # list of browser windows rather than a shelf of apps.
+                IconFile = if ($extra.icon -and (Test-Path $extra.icon -PathType Leaf)) {
+                    [string]$extra.icon
+                } else { $null }
                 Artwork = if ($extra.artwork -and (Test-Path $extra.artwork -PathType Leaf)) {
                     [string]$extra.artwork
                 } else { $null }
@@ -521,7 +528,9 @@ foreach ($entry in $entries) {
     $wanted[$entry.Name] = [pscustomobject]@{
         AppId = Get-ShortcutAppId -Exe "`"$($entry.Exe)`"" -AppName $entry.Name
         Exe = "`"$($entry.Exe)`""
-        Icon = if ($entry.OwnIcon) { $entry.Exe } else { $iconFile }
+        Icon = if ($entry.IconFile) { $entry.IconFile }
+               elseif ($entry.OwnIcon) { $entry.Exe }
+               else { $iconFile }
         LaunchOptions = $entry.Args
         Tags = $Collection
     }
@@ -717,7 +726,10 @@ foreach ($userDir in $userDirs) {
             # pointing at an exe makes Steam extract whatever size the icon
             # resource happens to carry, and both the library and Big Picture
             # draw it bigger than that.
-            Add-VdfString $w 'icon' $(if ($entry.OwnIcon) { $entry.Exe } else { $iconFile })
+            Add-VdfString $w 'icon' $(
+                if ($entry.IconFile) { $entry.IconFile }
+                elseif ($entry.OwnIcon) { $entry.Exe }
+                else { $iconFile })
             Add-VdfString $w 'ShortcutPath' ''
             Add-VdfString $w 'LaunchOptions' $entry.Args
             Add-VdfInt $w 'IsHidden' 0

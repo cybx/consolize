@@ -29,6 +29,12 @@ param(
     # An official logo or key art used instead of the generated glyph. The
     # Steam portrait, landscape, hero and logo images are derived from it.
     [string]$Artwork,
+    # The small icon Steam shows beside the entry. Without it the icon is the
+    # target executable's own, which is right for a real application and wrong
+    # for anything launched through a browser: six streaming services all
+    # pointing at msedge.exe show six identical Edge logos. Defaults to
+    # -Artwork when that is given.
+    [string]$Icon,
     [switch]$Delete,
     [switch]$List,
     [switch]$NoApply
@@ -106,6 +112,12 @@ if ($Artwork) {
 $entry = [ordered]@{ name = $Name; exe = $Exe; args = $Arguments }
 if ($Glyph) { $entry.glyph = $Glyph.ToUpper() }
 if ($Artwork) { $entry.artwork = $Artwork }
+if (-not $Icon -and $Artwork) { $Icon = $Artwork }
+if ($Icon) {
+    $Icon = [IO.Path]::GetFullPath($Icon)
+    if (-not (Test-Path $Icon -PathType Leaf)) { throw "$Icon is not there." }
+    $entry.icon = $Icon
+}
 
 $updated = @($extras | Where-Object { $_.name -ne $Name })
 $replaced = $updated.Count -ne $extras.Count
