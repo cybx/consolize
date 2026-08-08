@@ -79,7 +79,8 @@ if ($doSsh) {
     if (-not $cap -or $cap.State -ne 'Installed') {
         Write-Host '  installing the OpenSSH Server capability...'
         try {
-            $null = Add-WindowsCapability -Online -Name 'OpenSSH.Server~~~~0.0.1.0'
+            $add = Add-WindowsCapability -Online -Name 'OpenSSH.Server~~~~0.0.1.0'
+            if ($add.RestartNeeded) { Write-Host '  (Windows flagged a restart to finish it)' }
         } catch {
             throw ("Could not install OpenSSH Server: $($_.Exception.Message). " +
                 'Features on Demand come from Windows Update; if this machine cannot reach ' +
@@ -91,32 +92,50 @@ if ($doSsh) {
 
     # PowerShell as the login shell rather than cmd: every consolize script and
     # every fix you would type over this connection is PowerShell anyway. pwsh
-    # when the machine has it, Windows PowerShell otherwise.
+    # when the machine has it, Windows PowerShell otherwise. Written even when
+    # the service is not up yet, so the re-run after a restart has less to do.
     $shell = Get-Command pwsh.exe -CommandType Application -ErrorAction SilentlyContinue |
         Select-Object -First 1 -ExpandProperty Source
     if (-not $shell) { $shell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe' }
     New-Item 'HKLM:\SOFTWARE\OpenSSH' -Force | Out-Null
     New-ItemProperty 'HKLM:\SOFTWARE\OpenSSH' -Name DefaultShell -Value $shell -PropertyType String -Force | Out-Null
 
-    Set-Service sshd -StartupType Automatic
-    Start-Service sshd
-
-    # The capability sometimes creates this rule on every profile and sometimes
-    # not at all; either way the end state is one rule, home network only.
-    $rule = Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue
-    if ($rule) {
-        Set-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -Enabled True -Profile Domain, Private
-    } else {
-        New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -DisplayName 'OpenSSH SSH Server (sshd)' `
-            -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow -Profile Domain, Private | Out-Null
+    # Seen in the field: Add-WindowsCapability reports success and the sshd
+    # service only exists after the restart it quietly wanted. Wait a little,
+    # then step aside with instructions, rather than dying at Set-Service --
+    # which once took a whole provisioning run down three steps from the end.
+    $sshd = $null
+    for ($i = 0; $i -lt 20 -and -not $sshd; $i++) {
+        $sshd = Get-Service sshd -ErrorAction SilentlyContinue
+        if (-not $sshd) { Start-Sleep -Seconds 1 }
     }
 
-    Write-Host "  sshd running, PowerShell as the login shell ($shell)"
-    Write-Host ''
-    Write-Host '  From another machine:'
-    Write-Host "    ssh $env:USERNAME@$hostName" -ForegroundColor Cyan
-    Write-Host '  Key sign-in for administrators reads C:\ProgramData\ssh\administrators_authorized_keys'
-    Write-Host '  (not the usual ~\.ssh\authorized_keys); passwords work with nothing extra.'
+    if ($sshd) {
+        Set-Service sshd -StartupType Automatic
+        Start-Service sshd
+
+        # The capability sometimes creates this rule on every profile and
+        # sometimes not at all; either way the end state is one rule, home
+        # network only.
+        $rule = Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue
+        if ($rule) {
+            Set-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -Enabled True -Profile Domain, Private
+        } else {
+            New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -DisplayName 'OpenSSH SSH Server (sshd)' `
+                -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow -Profile Domain, Private | Out-Null
+        }
+
+        Write-Host "  sshd running, PowerShell as the login shell ($shell)"
+        Write-Host ''
+        Write-Host '  From another machine:'
+        Write-Host "    ssh $env:USERNAME@$hostName" -ForegroundColor Cyan
+        Write-Host '  Key sign-in for administrators reads C:\ProgramData\ssh\administrators_authorized_keys'
+        Write-Host '  (not the usual ~\.ssh\authorized_keys); passwords work with nothing extra.'
+    } else {
+        Write-Warning '  OpenSSH Server is staged, but its service has not appeared: Windows'
+        Write-Warning '  wants the restart first. After the next reboot, finish with:'
+        Write-Warning '    .\remote-console.ps1 -Ssh'
+    }
 }
 
 # -------------------------------------------------------------------- rdp ----

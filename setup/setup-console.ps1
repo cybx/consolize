@@ -573,7 +573,15 @@ else { & (Join-Path $here 'firewall-console.ps1') }
 # scoping true.
 if ($a.Remote) {
     Step 'Remote maintenance (SSH + Remote Desktop)'
-    & (Join-Path $here 'remote-console.ps1')
+    # In a try on purpose: remote access is a convenience, and a convenience
+    # must never abort a provisioning run minutes from the finish line. It did
+    # once, when sshd chose to exist only after a restart.
+    try {
+        & (Join-Path $here 'remote-console.ps1')
+    } catch {
+        Write-Warning "Remote maintenance did not finish: $($_.Exception.Message)"
+        Write-Warning 'The console works without it. Finish later with: .\remote-console.ps1'
+    }
 }
 
 Step 'Emptying Windows startup'
