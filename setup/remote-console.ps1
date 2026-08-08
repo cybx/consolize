@@ -191,7 +191,9 @@ if ($doRdp) {
     Write-Host '  ways that vary by Windows build. The reliable path is to RDP in first, then'
     Write-Host '  shadow from INSIDE that session, where the shadow is local, not networked:'
     Write-Host "    mstsc /v:$hostName          (a private admin desktop, not the TV)" -ForegroundColor Cyan
-    Write-Host '    then inside it:  mstsc /shadow:<id> /control /noConsentPrompt' -ForegroundColor Cyan
+    Write-Host '    then inside it, from a terminal running AS ADMINISTRATOR (elevation is'
+    Write-Host '    required to shadow another user, or it is refused):'
+    Write-Host '      mstsc /shadow:<id> /control /noConsentPrompt' -ForegroundColor Cyan
     Write-Host '  Signed in over RDP as the console account by mistake, and the TV is stuck'
     Write-Host '  on a lock screen? Give the session back (over SSH, or the admin session):'
     Write-Host '    tscon <id> /dest:console' -ForegroundColor Cyan
