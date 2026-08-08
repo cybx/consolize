@@ -410,7 +410,9 @@ if ($bootInto -ne 'steam') {
         Write-Warning "  $bootInto is not installed for this account ($frontendPath)."
         $package = switch ($bootInto) {
             'playnite' { 'Playnite.Playnite' }
-            'hydra'    { 'Hydra.Hydra' }
+            # HydraLauncher.Hydra, not Hydra.Hydra: the wrong id here made this
+            # self-heal fail with "no package found" on the one path it exists for
+            'hydra'    { 'HydraLauncher.Hydra' }
             default    { $null }
         }
         $wingetForUser = Get-Command winget.exe -CommandType Application -ErrorAction SilentlyContinue |
