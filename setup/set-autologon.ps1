@@ -169,6 +169,23 @@ $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
 try { $plain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
 finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
 
+# The stored secret is only useful if it is actually the account's password.
+# This used to store whatever was typed, and a mistyped one produced a machine
+# greeting every boot with "the password is incorrect" and no clue which side
+# was wrong. Refuse it here, where the fix is one command away.
+Add-Type -AssemblyName System.DirectoryServices.AccountManagement
+$ctx = New-Object System.DirectoryServices.AccountManagement.PrincipalContext(
+    [System.DirectoryServices.AccountManagement.ContextType]::Machine)
+$credentialOk = $false
+try { $credentialOk = $ctx.ValidateCredentials($UserName, $plain) } finally { $ctx.Dispose() }
+if (-not $credentialOk) {
+    $plain = $null
+    throw ("That is not $Domain\$UserName's current password, so nothing was stored: " +
+        'autologon with it would sit at the logon screen saying "incorrect" at every boot. ' +
+        'Type the right one, or reset the account first with: ' +
+        "Set-LocalUser -Name $UserName -Password (Read-Host -AsSecureString)")
+}
+
 [ConsolizeLsaSecret]::Store('DefaultPassword', $plain)
 
 Set-ItemProperty $wl -Name AutoAdminLogon -Value '1' -Type String
