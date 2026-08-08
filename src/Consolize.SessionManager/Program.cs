@@ -199,8 +199,7 @@ internal static class Program
     {
         try
         {
-            using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut);
-            client.Connect(3000);
+            using var client = ConnectToManager();
             var writer = new StreamWriter(client) { AutoFlush = true };
             var reader = new StreamReader(client);
             writer.WriteLine(command);
@@ -229,6 +228,52 @@ internal static class Program
                 catch { /* nothing left to try */ }
             }
             return 1;
+        }
+    }
+
+    /// <summary>
+    /// The pipe name carries a session id, and `consolize send` does not always
+    /// run in the console session: an SSH login gets a session of its own, where
+    /// the session-local name resolves to nothing. When the local pipe is not
+    /// there and exactly one consolize pipe exists on the machine, that is the
+    /// console session's manager, so talk to it. With several console sessions
+    /// there is no safe guess, and the original failure stands.
+    /// </summary>
+    private static NamedPipeClientStream ConnectToManager()
+    {
+        try
+        {
+            var local = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut);
+            try { local.Connect(1500); return local; }
+            catch { local.Dispose(); throw; }
+        }
+        catch (Exception) when (TryFindOtherManagerPipe(out var other))
+        {
+            var remote = new NamedPipeClientStream(".", other, PipeDirection.InOut);
+            try { remote.Connect(1500); return remote; }
+            catch { remote.Dispose(); throw; }
+        }
+    }
+
+    private static bool TryFindOtherManagerPipe(out string name)
+    {
+        name = "";
+        try
+        {
+            var candidates = Directory.GetFiles(@"\\.\pipe\", "consolize-*")
+                .Select(Path.GetFileName)
+                .OfType<string>()
+                .Where(candidate => !candidate.Equals(PipeName, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (candidates.Length != 1) return false;
+            name = candidates[0];
+            return true;
+        }
+        catch
+        {
+            // pipe enumeration is best effort; without it the local failure is
+            // the story to tell
+            return false;
         }
     }
 

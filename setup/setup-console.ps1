@@ -347,6 +347,13 @@ if ($Unattended) {
         (@{ quiet = 'stay on, stop asking, allow inbound on the home network'
             off   = 'off on every profile, closest to how a console behaves' }) 'quiet'
 
+    Write-Host ''
+    Write-Host '  When something breaks, the couch is the worst place to fix it from. SSH'
+    Write-Host '  runs commands here from another machine; Remote Desktop shows this screen'
+    Write-Host '  there (including shadowing the session that is on the TV). Both answer'
+    Write-Host '  only on the home network, with the accounts this machine already has.'
+    $remote = Ask-Yes 'Enable remote maintenance (SSH + Remote Desktop)?' $true
+
     $a = [pscustomobject]@{
         UserName    = $UserName
         Launchers   = $launchers
@@ -368,6 +375,7 @@ if ($Unattended) {
         Keyboard      = $keyboard
         SteamLanguage = $steamLanguage
         Firewall    = $firewall
+        Remote      = $remote
         ShellMethod = $ShellMethod
     }
 
@@ -383,6 +391,7 @@ if ($Unattended) {
     Write-Host "  power button    : $restMode"
     Write-Host "  autologon       : $(if ($autologon) { 'yes' } else { 'no' })"
     Write-Host "  elevation       : $elevation$(if ($elevation -ne 'none') { ' (account becomes an administrator)' })"
+    Write-Host "  remote          : $(if ($remote) { 'SSH + Remote Desktop, home network only' } else { 'off' })"
     Write-Host ''
     Write-Host '  After this, the machine signs out, logs into the console account by itself,'
     Write-Host '  walks you through the Steam sign-in, then replaces the shell and reboots.'
@@ -558,6 +567,14 @@ if ($a.Language) {
 Step 'Firewall'
 if ($a.Firewall -eq 'off') { & (Join-Path $here 'firewall-console.ps1') -Off }
 else { & (Join-Path $here 'firewall-console.ps1') }
+
+# After the firewall on purpose: remote-console scopes its rules to the home
+# network, and doing that against the final firewall state is what makes the
+# scoping true.
+if ($a.Remote) {
+    Step 'Remote maintenance (SSH + Remote Desktop)'
+    & (Join-Path $here 'remote-console.ps1')
+}
 
 Step 'Emptying Windows startup'
 # -MachineOnly on purpose: HKCU here is the ADMINISTRATOR's, and silently

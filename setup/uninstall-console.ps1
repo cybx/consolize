@@ -135,6 +135,11 @@ Step 'Firewall back to its defaults' {
     Invoke-Sibling 'firewall-console.ps1' @{ Restore = $true }
 }
 
+Step 'SSH and Remote Desktop off' {
+    # Off is the Windows default, whether or not consolize opened them.
+    Invoke-Sibling 'remote-console.ps1' @{ Restore = $true }
+}
+
 Step 'UAC back to normal' {
     $arguments = @{ Restore = $true }
     if ($UserName) { $arguments.UserName = $UserName }
