@@ -260,28 +260,41 @@ and if the library already has strays from an earlier run:
   .\add-console-shortcuts.ps1 -Force
 '@
     }
+} elseif ($Frontend -in @('playnite', 'hydra')) {
+    # The Steam check reads shortcuts.vdf; these keep their libraries in
+    # databases this script does not parse, so the way out cannot be verified
+    # from here, only insisted upon.
+    Write-Check WARN "The way out of $Frontend cannot be verified" @"
+Add an entry to $Frontend's own library that runs:
+  "C:\Program Files\Consolize\consolize.exe" send desktop
+Without one, the desktop is only reachable through the Quick Settings chord
+(hold Start+Back, Power page) or Ctrl+Shift+Esc with a keyboard.
+"@
 }
 
 # --- nothing else fighting for the logon ------------------------------------
+# Any frontend, not only Steam: a Playnite or Hydra autostart entry races the
+# one consolize launches just the same.
 $autostart = @()
 foreach ($key in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run')) {
     if (-not (Test-Path $key)) { continue }
     $props = Get-ItemProperty $key
     foreach ($p in $props.PSObject.Properties) {
         if ($p.Name -like 'PS*') { continue }
-        if ($p.Name -match 'steam' -or [string]$p.Value -match 'steam\.exe') { $autostart += $p.Name }
+        if ($p.Name -match 'steam|playnite|hydra' -or
+            [string]$p.Value -match 'steam\.exe|playnite[.\w]*\.exe|hydra\.exe') { $autostart += $p.Name }
     }
 }
 # the per-user Run key of the CONSOLE account, which is the one that matters and
 # is not HKCU: from here
-foreach ($name in @('Steam')) {
+foreach ($name in @('Steam', 'Playnite', 'Hydra')) {
     $value = Get-UserHiveValue -User $UserName -SubKey 'SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name $name
     if ($value) { $autostart += "$name (in $UserName's profile)" }
 }
 if ($autostart.Count -gt 0) {
-    Write-Check FAIL 'Steam autostarts on its own' "Entries: $($autostart -join ', '). Two Steams will race at logon. Fix: .\clean-startup.ps1"
+    Write-Check FAIL 'A frontend autostarts on its own' "Entries: $($autostart -join ', '). Two frontends will race at logon. Fix: .\clean-startup.ps1"
 } else {
-    Write-Check PASS 'No Steam autostart entry' 'consolize owns launching the frontend'
+    Write-Check PASS 'No frontend autostart entry' 'consolize owns launching the frontend'
 }
 
 # --- accounts ----------------------------------------------------------------

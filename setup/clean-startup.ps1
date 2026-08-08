@@ -18,8 +18,9 @@ Everything is backed up first and fully reversible.
   .\clean-startup.ps1 -Keep 'Synergy'   # ...except entries matching a pattern
   .\clean-startup.ps1 -Restore          # put it all back
 
-Steam is a special case: consolize launches it as the shell, so a leftover
-Steam autostart entry means two Steams racing at logon. It is always removed.
+The frontends are a special case: consolize launches the frontend as the shell,
+so a leftover Steam, Playnite or Hydra autostart entry means two of them racing
+at logon. They are always removed.
 #>
 param(
     [switch]$List,
@@ -152,8 +153,10 @@ if ($List) { return }
 $toRemove = New-Object System.Collections.Generic.List[object]
 
 foreach ($item in $items) {
-    # Steam must never autostart: consolize is what launches it
-    if ($item.Name -match 'steam' -or $item.Value -match 'steam\.exe') {
+    # No frontend may autostart: consolize is what launches it. Steam was the
+    # original case; Playnite and Hydra race the logon just the same.
+    if ($item.Name -match 'steam|playnite|hydra' -or
+        $item.Value -match 'steam\.exe|playnite[.\w]*\.exe|hydra\.exe') {
         $toRemove.Add($item)
         continue
     }

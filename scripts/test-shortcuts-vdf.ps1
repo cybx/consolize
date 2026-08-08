@@ -45,6 +45,11 @@ if ($patched -eq $before) { throw 'patch of the legacy extra-shortcuts path did 
 $before = $patched
 $patched = $patched -replace '\$steamProc = Get-Process steam[^\r\n]*', '$steamProc = $null'
 if ($patched -eq $before) { throw 'patch of the Steam process check did not apply' }
+# and never read the developer's real Consolize config: the machine running the
+# tests may boot into another frontend, and the suite must not notice
+$before = $patched
+$patched = $patched -replace '(?s)function Get-ConfiguredFrontend \{.*?\n\}', "function Get-ConfiguredFrontend { if (`$env:FAKE_FRONTEND) { return `$env:FAKE_FRONTEND } return 'steam' }"
+if ($patched -eq $before) { throw 'patch of Get-ConfiguredFrontend did not apply' }
 $script = Join-Path $root 'under-test.ps1'
 Set-Content $script $patched
 $env:FAKE_STEAM = $fakeSteam
@@ -391,6 +396,34 @@ try {
     ) "got $($entry[0].icon)"
 } finally {
     Remove-Item $extrasFile -Force -ErrorAction SilentlyContinue
+}
+
+Write-Host "`n16. another frontend configured: Steam's library is left alone"
+# The machine may boot into Playnite or Hydra; entries written into Steam would
+# sit in a library the console never opens. The desktop link is still made (the
+# way back is frontend-agnostic), Steam's file is not touched, -SteamAnyway
+# overrides, and -Remove is never gated, because uninstall runs it.
+$env:FAKE_FRONTEND = 'playnite'
+try {
+    [IO.File]::WriteAllBytes($vdf, (Build-SteamFile @('Cyberpunk')))
+    Remove-Item (Join-Path $fakeDesktop 'Back to Console Mode.lnk') -Force -ErrorAction SilentlyContinue
+    $bytesBefore = [IO.File]::ReadAllBytes($vdf)
+    $said = & $script -ConsolizeExe $exe -Force *>&1 | Out-String
+    $bytesAfter = [IO.File]::ReadAllBytes($vdf)
+    Check 'shortcuts.vdf untouched' (-not (Compare-Object $bytesBefore $bytesAfter)) 'the file changed'
+    Check 'the desktop link is still made' (
+        Test-Path (Join-Path $fakeDesktop 'Back to Console Mode.lnk')) 'missing'
+    Check 'and it says which frontend and why' ($said -match 'playnite') $said
+
+    & $script -ConsolizeExe $exe -Force -SteamAnyway | Out-Null
+    $got = Parse-Vdf ([IO.File]::ReadAllBytes($vdf))
+    Check '-SteamAnyway writes the entries' ($got.AppName -contains 'Desktop Mode') "$($got.AppName -join ', ')"
+
+    & $script -ConsolizeExe $exe -Force -Remove | Out-Null
+    $got = Parse-Vdf ([IO.File]::ReadAllBytes($vdf))
+    Check '-Remove is never gated' ($got.Count -eq 1 -and $got[0].AppName -eq 'Cyberpunk') "$($got.AppName -join ', ')"
+} finally {
+    Remove-Item env:FAKE_FRONTEND -ErrorAction SilentlyContinue
 }
 
 Write-Host ''

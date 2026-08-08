@@ -28,7 +28,10 @@ param(
     # Take them out instead: every entry of ours, whatever it is called, and the
     # artwork this wrote. The way back from a library that ended up with strays.
     [switch]$Remove,
-    [switch]$Force
+    [switch]$Force,
+    # Write the Steam entries even when another frontend is configured, for a
+    # machine that keeps Steam around and opens it from inside that frontend.
+    [switch]$SteamAnyway
 )
 $ErrorActionPreference = 'Stop'
 
@@ -52,6 +55,45 @@ $lnk.IconLocation = "$ConsolizeExe,0"
 $lnk.Save()
 Write-Host "Desktop shortcut: $backLink"
 
+}
+
+# --- only when Steam is the frontend ----------------------------------------
+# Everything below writes Steam's library. When the console boots into another
+# frontend, entries written there would sit in a library this machine never
+# opens. -Remove is never gated: taking our entries OUT of Steam is right on
+# every frontend, and it is what uninstall runs.
+
+function Get-ConfiguredFrontend {
+    # The same order the session manager reads: the account's own config first,
+    # then the machine-wide one provisioning writes, then the default.
+    foreach ($path in @(
+        (Join-Path $env:LOCALAPPDATA 'Consolize\config.json'),
+        (Join-Path $env:ProgramData 'Consolize\config.json')
+    )) {
+        if (-not (Test-Path $path)) { continue }
+        try {
+            $configured = (Get-Content $path -Raw | ConvertFrom-Json).Frontend
+            if ($configured) { return ([string]$configured).ToLowerInvariant() }
+        } catch { }
+    }
+    return 'steam'
+}
+
+if (-not $Remove -and -not $SteamAnyway) {
+    $frontend = Get-ConfiguredFrontend
+    if ($frontend -ne 'steam') {
+        Write-Host ''
+        Write-Host "The configured frontend is '$frontend', so no Steam library entries were" -ForegroundColor Yellow
+        Write-Host 'written: they would sit in a library this console never opens.' -ForegroundColor Yellow
+        Write-Host ''
+        Write-Host "Add the entries to $frontend's own library by hand, starting with the way out:"
+        Write-Host "  `"$ConsolizeExe`" send desktop" -ForegroundColor Cyan
+        Write-Host 'The list of extras (with paths and arguments) is kept in:'
+        Write-Host "  $(Join-Path $env:ProgramData 'Consolize\shared\extra-shortcuts.json')"
+        Write-Host 'Back on Steam one day? Rerun this with -Force. Want the Steam entries'
+        Write-Host 'anyway? Pass -SteamAnyway.'
+        return
+    }
 }
 
 # --- the way out: a non-Steam shortcut --------------------------------------

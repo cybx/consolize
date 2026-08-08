@@ -569,12 +569,14 @@ starts.
 
 # Outside the sign-in branch on purpose: an account that was ALREADY signed in
 # skips that branch entirely, and used to end up as a console with no way to
-# reach the desktop or the settings panel.
-if ($script:loginConfirmed -and $bootInto -eq 'steam') {
+# reach the desktop or the settings panel. No frontend condition here: the
+# script itself writes Steam's library only when Steam is the frontend, and the
+# desktop link plus the do-it-by-hand instructions matter on every frontend.
+if ($script:loginConfirmed) {
     $shortcuts = Join-Path $here 'add-console-shortcuts.ps1'
     if (Test-Path $shortcuts) {
         Write-Host ''
-        Write-Host '==> Adding "Quick Settings" and "Desktop Mode" to the Steam library' -ForegroundColor Cyan
+        Write-Host '==> Adding the console entries ("Desktop Mode" and the way back)' -ForegroundColor Cyan
         # a child script with its own EAP=Stop would otherwise kill this one and
         # the account would never report itself ready
         try { & $shortcuts -Force } catch { Write-Warning "  could not add them: $($_.Exception.Message)" }
