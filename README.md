@@ -93,6 +93,7 @@ default, so Enter all the way through is a working console.
 | Power button | sleep / hibernate | sleep |
 | Elevation | quiet / off / prompt | quiet |
 | Firewall | quiet / off / leave alone | quiet |
+| Remote maintenance | SSH + Remote Desktop (home network only) / off | on |
 
 The only step that needs you afterwards is signing in to Steam, inside the
 console account, because Windows keeps that login per user and no administrator
@@ -150,6 +151,7 @@ so on screen.
 | UAC `quiet`: administrators elevate without a prompt | anything running as the console account can gain administrator rights without asking you | `console-elevation.ps1 -Restore` |
 | UAC `off`: `EnableLUA = 0` | the above, plus everything runs elevated from the start, integrity levels included | same |
 | Firewall: inbound allowed on the private profile, notifications off | games stop asking, and so does Windows | `firewall-console.ps1 -Restore` |
+| SSH and Remote Desktop on, if you say yes, scoped to the Domain/Private firewall profiles | two remote doors into the machine, opened by its existing accounts and passwords | `remote-console.ps1 -Restore` |
 
 Reasonable for one person's console in a living room. Not for a machine other
 people use, and not for the only account of a work machine. Leaving Windows
@@ -458,6 +460,43 @@ That gives back the logon screen, the desktop and the boot messages in one go,
 and cancels anything still scheduled. The logon screen is only hidden at the very
 end of a successful setup, precisely so a failure never hides the way back in.
 
+### Fixing it from another machine
+
+The couch is the worst place to debug the couch machine. Say yes to remote
+maintenance and two doors open, both built into Windows, both answering only on
+the home network (firewall rules scoped to the Domain and Private profiles,
+never Public), both signed into with the accounts and passwords the machine
+already has. [`remote-console.ps1`](setup/remote-console.ps1) opens them or
+closes them (`-Restore`) at any time, and the uninstaller closes both.
+
+**SSH** is for commands: OpenSSH Server with PowerShell as the login shell, the
+way a Linux box does it. The session manager's pipe name carries a session id
+and an SSH logon gets a session of its own, so `consolize send` now looks for
+the console session's pipe when its own is not there:
+
+```powershell
+ssh you@console
+consolize send status
+consolize send desktop     # the TV drops to the desktop, from your chair
+```
+
+One trap worth knowing: key sign-in for an administrator reads
+`C:\ProgramData\ssh\administrators_authorized_keys`, not
+`~\.ssh\authorized_keys`. Passwords work with nothing extra.
+
+**Remote Desktop** is for a screen, and there are two screens to ask for.
+Signing in as the admin account opens a separate session and leaves the
+television alone. *Shadowing* shows the session that is actually on the TV:
+
+```powershell
+ssh you@console qwinsta                     # note the console session id
+mstsc /v:console /shadow:<id> /control /noConsentPrompt
+```
+
+Signing in over RDP as the console account itself is the mistake: RDP takes the
+session with it and the television drops to a lock screen until
+`tscon <id> /dest:console`, run over SSH, hands it back.
+
 ### Putting your own apps in the library
 
 Steam can add a non-Steam game itself, but that takes a mouse and a file
@@ -473,6 +512,14 @@ cd 'C:\Program Files\Consolize\setup'
 It gets cover art and lands in the **Consolize** collection with the rest. The
 list lives in `C:\ProgramData\Consolize\shared\extra-shortcuts.json`, so it is
 reapplied on every update rather than being a one-off.
+
+All of that writes into **Steam's** library. Configured to boot into another
+frontend, `add-console-shortcuts.ps1` now writes none of it and says so:
+entries would sit in a library the console never opens. The desktop shortcut is
+still made, the list is still kept — back on Steam one day, a single `-Force`
+run projects it all again — and `-SteamAnyway` overrides. Add the entries to
+the other frontend's own library by hand, starting with the way out: one that
+runs `consolize.exe send desktop`.
 
 Taking an app off the list does not remove it from the library: an entry that no
 longer matches anything consolize knows about cannot be told apart from one you

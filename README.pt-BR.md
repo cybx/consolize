@@ -95,6 +95,7 @@ funcionando.
 | Botão de energia | dormir / hibernar | dormir |
 | Elevação | quiet / off / prompt | quiet |
 | Firewall | quiet / off / não mexer | quiet |
+| Manutenção remota | SSH + Área de Trabalho Remota (só rede doméstica) / off | ligada |
 
 O único passo que precisa de você depois disso é o login na Steam, **dentro da
 conta do console**, porque o Windows guarda esse login por usuário e nenhum
@@ -152,6 +153,7 @@ script diz isso na tela.
 | UAC `quiet`: administradores elevam sem prompt | qualquer coisa rodando na conta do console pode ganhar direitos de administrador sem te perguntar | `console-elevation.ps1 -Restore` |
 | UAC `off`: `EnableLUA = 0` | o acima, e mais: tudo roda elevado desde o começo, níveis de integridade inclusive | idem |
 | Firewall: entrada liberada no perfil privado, notificações desligadas | os jogos param de pedir, e o Windows também | `firewall-console.ps1 -Restore` |
+| SSH e Área de Trabalho Remota ligados, se você aceitar, restritos aos perfis Domínio/Privado do firewall | duas portas remotas para dentro da máquina, abertas com as contas e senhas que ela já tem | `remote-console.ps1 -Restore` |
 
 Razoável para o console de uma pessoa numa sala de estar. Não para uma máquina
 que outras pessoas usam, e não para a única conta de uma máquina de trabalho.
@@ -477,6 +479,43 @@ cancela o que ainda estiver agendado. A tela de login só é escondida no finalz
 de uma instalação bem sucedida, justamente para que uma falha nunca esconda o
 caminho de volta.
 
+### Consertando de outra máquina
+
+O sofá é o pior lugar para debugar a máquina do sofá. Aceite a manutenção
+remota e duas portas se abrem, as duas nativas do Windows, as duas respondendo
+só na rede doméstica (regras de firewall restritas aos perfis Domínio e
+Privado, nunca ao Público), as duas entrando com as contas e senhas que a
+máquina já tem. O [`remote-console.ps1`](setup/remote-console.ps1) liga ou
+desfaz (`-Restore`) a qualquer momento, e o desinstalador fecha as duas.
+
+**SSH** é para comandos: OpenSSH Server com PowerShell como shell de login, do
+jeito que uma máquina Linux faz. O nome do pipe do session manager carrega um
+id de sessão e um login SSH ganha uma sessão própria, então o `consolize send`
+agora procura o pipe da sessão do console quando o dele não existe:
+
+```powershell
+ssh voce@console
+consolize send status
+consolize send desktop     # a TV cai para o desktop, da sua cadeira
+```
+
+Uma armadilha que vale conhecer: login por chave de um administrador lê
+`C:\ProgramData\ssh\administrators_authorized_keys`, não
+`~\.ssh\authorized_keys`. Senhas funcionam sem nada a mais.
+
+**Área de Trabalho Remota** é para ver uma tela, e há duas telas para pedir.
+Entrar como a conta de administrador abre uma sessão separada e deixa a
+televisão em paz. O *shadowing* mostra a sessão que está de fato na TV:
+
+```powershell
+ssh voce@console qwinsta                    # anote o id da sessão do console
+mstsc /v:console /shadow:<id> /control /noConsentPrompt
+```
+
+Entrar por RDP como a própria conta do console é o erro: o RDP leva a sessão
+embora e a televisão cai numa tela de bloqueio até `tscon <id> /dest:console`,
+rodado por SSH, devolvê-la.
+
 ### Colocando seus próprios apps na biblioteca
 
 A Steam consegue adicionar um jogo não-Steam sozinha, mas isso pede mouse e
@@ -492,6 +531,14 @@ cd 'C:\Program Files\Consolize\setup'
 Ele ganha capa e cai na coleção **Consolize** junto com o resto. A lista fica em
 `C:\ProgramData\Consolize\shared\extra-shortcuts.json`, então é reaplicada a cada
 atualização em vez de ser coisa de uma vez só.
+
+Tudo isso escreve na biblioteca **da Steam**. Configurado para dar boot em
+outro frontend, o `add-console-shortcuts.ps1` agora não escreve nada disso e
+avisa: as entradas ficariam numa biblioteca que o console nunca abre. O atalho
+do desktop ainda é criado, a lista continua guardada — de volta à Steam um dia,
+um único `-Force` projeta tudo de novo — e `-SteamAnyway` força a escrita.
+Adicione as entradas na biblioteca do outro frontend na mão, começando pela
+saída: uma que rode `consolize.exe send desktop`.
 
 Tirar um app da lista não tira ele da biblioteca: uma entrada que não bate mais
 com nada que o consolize conheça não dá para distinguir de uma que você adicionou
