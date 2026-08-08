@@ -150,6 +150,16 @@ if ($doRdp) {
     Enable-NetFirewallRule -Group $rdpFirewallGroup
     Set-NetFirewallRule -Group $rdpFirewallGroup -Profile Domain, Private
 
+    # Session shadowing rides a SEPARATE firewall rule that enabling the Remote
+    # Desktop group does not reliably turn on. Without it, `mstsc /shadow` is
+    # refused with "access denied" even though normal RDP works and the policy
+    # below is set. Seen in the field, so turn it on by name.
+    $shadowRule = Get-NetFirewallRule -Name 'RemoteDesktop-Shadow-In-TCP' -ErrorAction SilentlyContinue
+    if ($shadowRule) {
+        Enable-NetFirewallRule -Name 'RemoteDesktop-Shadow-In-TCP'
+        Set-NetFirewallRule -Name 'RemoteDesktop-Shadow-In-TCP' -Profile Domain, Private
+    }
+
     # Shadowing: view and drive the session that is on the television instead
     # of opening one of your own. 2 = full control without asking on the TV,
     # which is the point: the person at the TV and the person shadowing are the
@@ -163,6 +173,9 @@ if ($doRdp) {
     Write-Host "    mstsc /v:$hostName      (as $env:USERNAME, NOT the console account)" -ForegroundColor Cyan
     Write-Host '  To SEE the television session, find its id (over SSH: qwinsta), then:'
     Write-Host "    mstsc /v:$hostName /shadow:<id> /control /noConsentPrompt" -ForegroundColor Cyan
+    Write-Host '  Shadowing from a machine whose Windows user is not an admin here needs the'
+    Write-Host '  credential cached first, or it is refused with "access denied":'
+    Write-Host "    cmdkey /generic:TERMSRV/$hostName /user:$env:USERNAME /pass" -ForegroundColor Cyan
     Write-Host '  Signed in over RDP as the console account by mistake, and the TV is stuck'
     Write-Host '  on a lock screen? Give the session back (over SSH, or the admin session):'
     Write-Host '    tscon <id> /dest:console' -ForegroundColor Cyan

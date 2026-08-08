@@ -94,4 +94,15 @@ Write-Host 'Quiet boot (no Windows logo or spinner)...'
 bcdedit.exe /set '{globalsettings}' bootuxdisabled on | Out-Null
 bcdedit.exe /set '{current}' quietboot on | Out-Null
 
+# On a fresh machine PowerShell defaults to Restricted, which refuses to run any
+# .ps1 at all. On a console that means every maintenance script, consolize's own
+# included, hits "running scripts is disabled" until it is called with
+# -ExecutionPolicy Bypass, which is pure friction over SSH or from a terminal in
+# desktop mode. RemoteSigned lets local scripts run. It is explicitly NOT a
+# security boundary (anything still runs under -ExecutionPolicy Bypass), so this
+# removes the friction without pretending to add protection.
+Write-Host 'PowerShell execution policy: RemoteSigned (local scripts run without the "scripts are disabled" wall)...'
+try { Set-ExecutionPolicy -Scope LocalMachine -ExecutionPolicy RemoteSigned -Force }
+catch { Write-Warning "  could not set the execution policy: $($_.Exception.Message)" }
+
 Write-Host 'Done. Reboot to see the quiet boot.'
