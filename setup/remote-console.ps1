@@ -65,7 +65,9 @@ if ($Restore) {
     Get-NetFirewallRule -Group $rdpFirewallGroup -ErrorAction SilentlyContinue |
         Disable-NetFirewallRule
     Remove-ItemProperty $tsPolicy -Name Shadow -ErrorAction SilentlyContinue
-    Write-Host '  Remote Desktop off, its firewall rules disabled, the shadow policy removed'
+    Remove-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' `
+        -Name LocalAccountTokenFilterPolicy -ErrorAction SilentlyContinue
+    Write-Host '  Remote Desktop off, its firewall rules disabled, the shadow policy and remote-UAC exception removed'
     return
 }
 
@@ -166,6 +168,15 @@ if ($doRdp) {
     # same owner.
     New-Item $tsPolicy -Force | Out-Null
     New-ItemProperty $tsPolicy -Name Shadow -Value 2 -PropertyType DWord -Force | Out-Null
+
+    # Remote shadow's control channel authenticates over the network, and Windows
+    # filters a LOCAL admin account down to a standard-user token over the network
+    # (remote UAC), so the shadow is refused with "access denied" even with the
+    # policy and firewall right. Seen in the field on the first live console. This
+    # lets a local admin keep its full token over the network, which is what
+    # shadowing from another machine, and remote administration generally, needs.
+    New-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' `
+        -Name LocalAccountTokenFilterPolicy -Value 1 -PropertyType DWord -Force | Out-Null
 
     Write-Host '  Remote Desktop on, NLA required, home network only'
     Write-Host ''
