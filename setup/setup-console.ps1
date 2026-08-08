@@ -129,6 +129,22 @@ if ($Finish) {
         Write-FinishLog 'timed out waiting for the account to be ready; leaving the shell alone'
         return
     }
+    # The reboot between the phases is the restart OpenSSH quietly wanted:
+    # phase 1 can only stage the capability when the service refuses to exist
+    # until the machine turns around. Now it has turned around, so finish the
+    # ssh door here, before preflight -- if preflight fails, a reachable
+    # machine is exactly what fixing it needs. Still never fatal.
+    if ($answers.Remote) {
+        Write-FinishLog 'completing remote maintenance (ssh)'
+        try {
+            & (Join-Path $here 'remote-console.ps1') -Ssh *>&1 |
+                ForEach-Object { Write-FinishLog "  $_" }
+        } catch {
+            Write-FinishLog "  remote maintenance still not done: $($_.Exception.Message)"
+            Write-FinishLog '  finish it any time with: remote-console.ps1 -Ssh'
+        }
+    }
+
     Write-FinishLog 'account reported ready, running preflight'
 
     # *>&1, not 2>&1: preflight reports through Write-Host, which is stream 6.
@@ -172,7 +188,15 @@ Write-Host '  consolize' -ForegroundColor Cyan
 Write-Host '  turns this PC into a couch gaming console'
 Write-Host ''
 
-if ($Unattended) {
+# A machine that already answered once resumes at the cost of one Enter. The
+# alternative was typing '-Unattended' on a television, which nobody should.
+$resume = [bool]$Unattended
+if (-not $resume -and (Test-Path $answersPath)) {
+    $reuse = Read-Host 'Found answers from a previous run. Reuse them and continue? [Y/n]'
+    $resume = $reuse -notmatch '^[nN]'
+}
+
+if ($resume) {
     if (-not (Test-Path $answersPath)) { throw "No saved answers at $answersPath. Run without -Unattended once." }
     $a = Get-Content $answersPath -Raw | ConvertFrom-Json
     Write-Host 'Reusing saved answers.'
